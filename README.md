@@ -1,6 +1,6 @@
 ## esp32-ntp
 
-High-precision NTP server for ESP32 using a W5500 Ethernet controller and GPS PPS discipline, with an optional MAX7219 LED matrix display and an HTTP stats endpoint.
+High-precision NTP server for ESP32 using GPS PPS discipline over either WIZnet W5500 Ethernet (default) or WiFi STA, with an optional MAX7219 LED matrix display and an HTTP stats endpoint.
 
 ### Features
 
@@ -13,7 +13,7 @@ High-precision NTP server for ESP32 using a W5500 Ethernet controller and GPS PP
 ### Hardware overview
 
 - **MCU**: ESP32 (IDF target `esp32`).
-- **Ethernet**: WIZnet W5500 on a dedicated SPI bus (HSPI by default).
+- **Ethernet**: Optional WIZnet W5500 on a dedicated SPI bus (HSPI by default).
 - **GPS**: UART GPS module (e.g. NEO‑6M) plus PPS input GPIO.
 - **Display (optional)**: Up to 4× MAX7219 8×8 matrices on a separate SPI bus.
 
