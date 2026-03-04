@@ -18,13 +18,15 @@ GpsDiscipline::GpsDiscipline()
   : uartPort(-1), baud(0), txPin(-1), rxPin(-1), ppsGpio(-1),
     gpsLock(false), lastPpsSec1900(0), lastPpsFrac(0), lastPpsMonotonicUs(0),
     lastNmeaUnixSec(0), lastNmeaUpdateUs(0), ppsPending(false), ppsEdgeUs(0),
+    ppsCapValue(0), prevPpsCapValue(0),
     statLastOffsetSec(0), statRmsOffsetSec(0), statFrequencyPpm(0),
     statPpsJitterSec(0), statPpsCount(0), ppsRejectCount(0), prevPpsMonotonicUs(0),
     ppsIntervalMeanUs(0), ppsJitterVarUs2(0),
     firstPpsMonotonicUs(0), firstPpsSec(0), clockCorrectionUs(0),
     prevPpsEdgeForOffset(0), lastAppliedTotalCorrUs(0),
     freqWindowStartUs(0), freqWindowStartSec(0), freqWindowSamples(0),
-    filteredFrequencyPpm(0), filteredRmsOffsetSec(0) {}
+    filteredFrequencyPpm(0), filteredRmsOffsetSec(0),
+    capTimer(nullptr), capChannel(nullptr) {}
 
 esp_err_t GpsDiscipline::begin(int uartPort_, int baud_, int txPin_, int rxPin_, int ppsGpio_) {
   uartPort = uartPort_;
@@ -47,25 +49,39 @@ esp_err_t GpsDiscipline::begin(int uartPort_, int baud_, int txPin_, int rxPin_,
 
   xTaskCreatePinnedToCore(&GpsDiscipline::uart_task, "gps_uart", 4096, this, 5, nullptr, 1);
 
-  // PPS GPIO interrupt
-  gpio_config_t io_conf = {};
-  io_conf.intr_type = GPIO_INTR_POSEDGE;
-  io_conf.mode = GPIO_MODE_INPUT;
-  io_conf.pin_bit_mask = (1ULL << ppsGpio);
-  io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-  io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-  ESP_ERROR_CHECK(gpio_config(&io_conf));
+  // PPS capture via MCPWM hardware — latches timer at exact GPIO edge
+  mcpwm_capture_timer_config_t cap_timer_cfg = {};
+  cap_timer_cfg.group_id = 0;
+  cap_timer_cfg.clk_src = MCPWM_CAPTURE_CLK_SRC_DEFAULT;
+  ESP_ERROR_CHECK(mcpwm_new_capture_timer(&cap_timer_cfg, &capTimer));
 
-  ESP_ERROR_CHECK(gpio_install_isr_service(0));
-  ESP_ERROR_CHECK(gpio_isr_handler_add((gpio_num_t)ppsGpio, &GpsDiscipline::pps_isr_handler, this));
+  mcpwm_capture_channel_config_t cap_ch_cfg = {};
+  cap_ch_cfg.gpio_num = ppsGpio;
+  cap_ch_cfg.prescale = 1;
+  cap_ch_cfg.flags.pos_edge = 1;
+  cap_ch_cfg.flags.neg_edge = 0;
+  ESP_ERROR_CHECK(mcpwm_new_capture_channel(capTimer, &cap_ch_cfg, &capChannel));
+
+  mcpwm_capture_event_callbacks_t cbs = {};
+  cbs.on_cap = &GpsDiscipline::pps_capture_callback;
+  ESP_ERROR_CHECK(mcpwm_capture_channel_register_event_callbacks(capChannel, &cbs, this));
+
+  ESP_ERROR_CHECK(mcpwm_capture_channel_enable(capChannel));
+  ESP_ERROR_CHECK(mcpwm_capture_timer_enable(capTimer));
+  ESP_ERROR_CHECK(mcpwm_capture_timer_start(capTimer));
 
   return ESP_OK;
 }
 
-void IRAM_ATTR GpsDiscipline::pps_isr_handler(void* arg) {
-  GpsDiscipline* self = reinterpret_cast<GpsDiscipline*>(arg);
+bool IRAM_ATTR GpsDiscipline::pps_capture_callback(
+    mcpwm_cap_channel_handle_t cap_channel,
+    const mcpwm_capture_event_data_t* edata,
+    void* user_ctx) {
+  GpsDiscipline* self = reinterpret_cast<GpsDiscipline*>(user_ctx);
+  self->ppsCapValue = edata->cap_value;
   self->ppsEdgeUs = esp_timer_get_time();
   self->ppsPending = true;
+  return false;  // no high-priority task wakeup needed
 }
 
 static bool parse_two(const char* s, int& v) {
@@ -182,6 +198,7 @@ void GpsDiscipline::handle_pps_deferred() {
   if (!ppsPending) return;
   ppsPending = false;
   uint64_t ppsEdgeCapture = ppsEdgeUs;
+  uint32_t capValue = ppsCapValue;
   lastPpsMonotonicUs = ppsEdgeCapture;
 
   uint64_t nowUs = esp_timer_get_time();
@@ -193,12 +210,13 @@ void GpsDiscipline::handle_pps_deferred() {
 
     // --- PPS outlier rejection gate ---
     // Detect missed or spurious PPS by checking interval sanity.
-    // If the interval is outside +/-10% of 1s, skip servo/stats updates
-    // but still set the clock from NMEA and update the edge reference.
+    // Interval is computed from MCPWM hardware capture ticks (80 MHz)
+    // for precise measurement free of ISR latency jitter.
+    // Signed 32-bit subtraction handles single counter wraps correctly.
     bool outlier = false;
     double offset = 0;
     if (prevPpsEdgeForOffset != 0) {
-      double ppsIntervalUs = (double)((int64_t)(ppsEdgeCapture - prevPpsEdgeForOffset));
+      double ppsIntervalUs = (double)(int32_t)(capValue - prevPpsCapValue) / 80.0;
       if (ppsIntervalUs < 900000.0 || ppsIntervalUs > 1100000.0) {
         outlier = true;
         ppsRejectCount++;
@@ -265,7 +283,7 @@ void GpsDiscipline::handle_pps_deferred() {
     // Secondary micro-outlier gate: reject intervals where deviation from mean
     // exceeds max(10µs, 5σ) — catches ISR latency spikes that pass the coarse gate.
     if (prevPpsMonotonicUs != 0 && !outlier) {
-      double intervalUs = (double)(ppsEdgeCapture - prevPpsMonotonicUs);
+      double intervalUs = (double)(int32_t)(capValue - prevPpsCapValue) / 80.0;
       if (ppsIntervalMeanUs == 0) {
         ppsIntervalMeanUs = intervalUs;
       } else {
@@ -284,6 +302,7 @@ void GpsDiscipline::handle_pps_deferred() {
       }
     }
     prevPpsMonotonicUs = ppsEdgeCapture;
+    prevPpsCapValue = capValue;
 
     // --- Sliding-window frequency estimator ---
     // Resets every ~300 seconds so stale boot data doesn't dominate.
@@ -348,6 +367,7 @@ void GpsDiscipline::handle_pps_deferred() {
     lastPpsSec1900 = unix_to_ntp_seconds(tv.tv_sec);
     lastPpsFrac = 0;
     prevPpsEdgeForOffset = 0;
+    prevPpsCapValue = 0;
     lastAppliedTotalCorrUs = 0;
     if (wasLocked) {
       ESP_LOGW(TAG, "GPS lock lost - NMEA stale or missing");

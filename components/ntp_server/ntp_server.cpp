@@ -25,10 +25,7 @@ static void wr_ntp_ts(uint8_t* p, int idx, uint32_t sec, uint32_t frac) {
   wr32(p, idx + 4, frac);
 }
 
-NtpServer::NtpServer() : sock(-1), port(0), gps(nullptr), requestCount(0), useWifi(false),
-    sendPending(false), sendStartUs(0), pendingPort(0), pendingLocked(false) {
-  memset(pendingRsp, 0, sizeof(pendingRsp));
-  memset(pendingIp, 0, sizeof(pendingIp));
+NtpServer::NtpServer() : sock(-1), port(0), gps(nullptr), requestCount(0), useWifi(false) {
 }
 
 esp_err_t NtpServer::begin(int port_, GpsDiscipline* gps_) {
@@ -92,23 +89,6 @@ void NtpServer::computeNtpTimestamp(uint64_t monoUs, bool locked, uint32_t& sec1
 
 void NtpServer::loop() {
   if (sock < 0) return;
-
-  if (!useWifi) {
-    if (sendPending) {
-      int rc = w5k_sendto_poll((uint8_t)sock);
-      if (rc == 0) return;
-      if (rc == 1 && pendingLocked) {
-        uint64_t elapsed = esp_timer_get_time() - sendStartUs;
-        if (elapsed > 2000) {
-          uint32_t s, f;
-          computeNtpTimestamp(esp_timer_get_time(), true, s, f);
-          wr_ntp_ts(pendingRsp, 40, s, f);
-          w5k_sendto((uint8_t)sock, pendingRsp, 48, pendingIp, pendingPort);
-        }
-      }
-      sendPending = false;
-    }
-  }
 
   static uint32_t windowSec = 0;
   static int windowCount = 0;
@@ -194,12 +174,11 @@ void NtpServer::loop() {
     rsp[12] = 'R'; rsp[13] = 'A'; rsp[14] = 'T'; rsp[15] = 'E';
   }
 
-  // Transmit timestamp (t3) — captured as late as possible
-  uint32_t t3_sec, t3_frac;
-  computeNtpTimestamp(esp_timer_get_time(), locked, t3_sec, t3_frac);
-  wr_ntp_ts(rsp, 40, t3_sec, t3_frac);
-
   if (useWifi) {
+    // WiFi: stamp t3 as late as possible, then send
+    uint32_t t3_sec, t3_frac;
+    computeNtpTimestamp(esp_timer_get_time(), locked, t3_sec, t3_frac);
+    wr_ntp_ts(rsp, 40, t3_sec, t3_frac);
     if (sendto(sock, rsp, 48, 0, (struct sockaddr*)&wifi_from, wifi_fromlen) == 48) {
       requestCount++;
       ESP_LOGD(TAG, "Replied to %d.%d.%d.%d:%u (stratum %d, LI=%d)",
@@ -207,17 +186,20 @@ void NtpServer::loop() {
     }
     return;
   }
-  memcpy(pendingRsp, rsp, 48);
-  memcpy(pendingIp, from_ip, 4);
-  pendingPort = from_port;
-  pendingLocked = locked;
-  sendStartUs = esp_timer_get_time();
-  if (w5k_sendto_nb((uint8_t)sock, rsp, sizeof(rsp), from_ip, from_port) == 0) {
-    sendPending = true;
+
+  // W5500: prime ARP cache first so t3 isn't stale due to ARP latency
+  w5k_arp_prime((uint8_t)sock, from_ip);
+
+  // NOW stamp t3 — ARP is resolved, sendto will depart immediately
+  uint32_t t3_sec, t3_frac;
+  computeNtpTimestamp(esp_timer_get_time(), locked, t3_sec, t3_frac);
+  wr_ntp_ts(rsp, 40, t3_sec, t3_frac);
+
+  if (w5k_sendto((uint8_t)sock, rsp, sizeof(rsp), from_ip, from_port) == (int32_t)sizeof(rsp)) {
     requestCount++;
     ESP_LOGD(TAG, "Replied to %d.%d.%d.%d:%u (stratum %d, LI=%d)",
              from_ip[0], from_ip[1], from_ip[2], from_ip[3], (unsigned)from_port, rsp[1], li);
   } else {
-    ESP_LOGW(TAG, "sendto_nb failed");
+    ESP_LOGW(TAG, "W5500 sendto failed");
   }
 }

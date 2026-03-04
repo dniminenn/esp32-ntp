@@ -1,10 +1,11 @@
 ## esp32-ntp
 
-High-precision NTP server for ESP32 using GPS PPS discipline, with support for WIZnet W5500 Ethernet and WiFi STA, an optional MAX7219 LED matrix display, and an HTTP stats endpoint. Hardware-assisted transmit timestamp correction is implemented for the W5500 path; the same NTP server and metrics are available over either interface.
+High-precision NTP server for ESP32 using GPS PPS discipline, with support for WIZnet W5500 Ethernet and WiFi STA, an optional MAX7219 LED matrix display, and an HTTP stats endpoint. PPS edges are captured in hardware via the MCPWM capture peripheral (12.5 ns resolution, zero ISR jitter). Hardware-assisted transmit timestamp correction is implemented for the W5500 path; the same NTP server and metrics are available over either interface.
 
 ### Features
 
 - **NTP server** on UDP port 123, serving time disciplined by a GPS receiver with PPS.
+- **MCPWM hardware PPS capture** — the ESP32's MCPWM capture peripheral latches a counter at the exact GPIO edge in silicon, providing 12.5 ns (80 MHz APB clock) resolution with zero ISR-latency jitter. The PI servo, jitter estimator, and outlier rejection all operate on hardware-captured tick deltas.
 - **Hardware timestamping logic** that compensates for PPS frequency error and ARP/Tx latency when using the W5500 Ethernet controller.
 - **HTTP stats endpoint** on TCP port 8080 exposing Prometheus-style metrics for lock state, offsets, jitter, frequency, uptime, and request counts (served over whichever interface is selected).
 - **Optional LED display** (MAX7219 8×8 matrices on SPI) showing current time and a top-row centisecond uptime indicator.
@@ -14,7 +15,7 @@ High-precision NTP server for ESP32 using GPS PPS discipline, with support for W
 
 - **MCU**: ESP32 (IDF target `esp32`).
 - **Ethernet**: Optional WIZnet W5500 on a dedicated SPI bus (HSPI by default). When selected as the network interface, this path uses the W5500 hardware-friendly transmit timing and timestamping logic.
-- **GPS**: UART GPS module (e.g. NEO‑6M) plus PPS input GPIO.
+- **GPS**: UART GPS module (e.g. NEO‑6M) plus PPS input GPIO. PPS is captured via the MCPWM peripheral — any GPIO works (including input-only pins 34–39).
 - **Display (optional)**: Up to 4× MAX7219 8×8 matrices on a separate SPI bus.
 
 Default pins are defined in `config.cpp` and can be overridden via `menuconfig` (see below).
@@ -92,7 +93,7 @@ Ethernet and GPS pin assignments are in `Config::getW5500*` and `Config::getGps*
 
 - `main/app_main.cpp` – system bring-up, component wiring, main loop.
 - `components/config` – pinout and configuration accessors (`Config::…`).
-- `components/gps` – GPS and PPS disciplining logic.
+- `components/gps` – GPS NMEA parsing and PPS disciplining logic. Uses MCPWM hardware capture for jitter-free PPS interval measurement and a PI servo for clock steering.
 - `components/ntp_server` – NTP server implementation over W5500 UDP or WiFi UDP (lwIP), depending on the selected interface.
 - `components/ntp_stats` – HTTP stats server over W5500 TCP or WiFi TCP (lwIP), depending on the selected interface.
 - `components/w5500_eth` – W5500 SPI driver, DHCP and static IP handling, and PHY setup.

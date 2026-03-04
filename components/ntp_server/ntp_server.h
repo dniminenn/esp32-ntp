@@ -20,14 +20,6 @@ private:
   GpsDiscipline* gps;
   uint32_t requestCount;
   bool useWifi;
-
-  // Non-blocking send state for ARP delay detection
-  bool sendPending;
-  uint64_t sendStartUs;
-  uint8_t pendingRsp[48];
-  uint8_t pendingIp[4];
-  uint16_t pendingPort;
-  bool pendingLocked;
 };
 
 
