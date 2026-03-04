@@ -1,19 +1,19 @@
 ## esp32-ntp
 
-High-precision NTP server for ESP32 using GPS PPS discipline over either WIZnet W5500 Ethernet (default) or WiFi STA, with an optional MAX7219 LED matrix display and an HTTP stats endpoint.
+High-precision NTP server for ESP32 using GPS PPS discipline, with support for WIZnet W5500 Ethernet and WiFi STA, an optional MAX7219 LED matrix display, and an HTTP stats endpoint. Hardware-assisted transmit timestamp correction is implemented for the W5500 path; the same NTP server and metrics are available over either interface.
 
 ### Features
 
 - **NTP server** on UDP port 123, serving time disciplined by a GPS receiver with PPS.
-- **Hardware timestamping logic** that compensates for PPS frequency error and ARP/Tx latency on the W5500.
-- **HTTP stats endpoint** on TCP port 8080 (over W5500) exposing Prometheus-style metrics for lock state, offsets, jitter, frequency, uptime, and request counts.
+- **Hardware timestamping logic** that compensates for PPS frequency error and ARP/Tx latency when using the W5500 Ethernet controller.
+- **HTTP stats endpoint** on TCP port 8080 exposing Prometheus-style metrics for lock state, offsets, jitter, frequency, uptime, and request counts (served over whichever interface is selected).
 - **Optional LED display** (MAX7219 8×8 matrices on SPI) showing current time and a top-row centisecond uptime indicator.
 - Runs directly on **ESP32 + W5500** with no Wi‑Fi or SNTP dependency once GPS is locked.
 
 ### Hardware overview
 
 - **MCU**: ESP32 (IDF target `esp32`).
-- **Ethernet**: Optional WIZnet W5500 on a dedicated SPI bus (HSPI by default).
+- **Ethernet**: Optional WIZnet W5500 on a dedicated SPI bus (HSPI by default). When selected as the network interface, this path uses the W5500 hardware-friendly transmit timing and timestamping logic.
 - **GPS**: UART GPS module (e.g. NEO‑6M) plus PPS input GPIO.
 - **Display (optional)**: Up to 4× MAX7219 8×8 matrices on a separate SPI bus.
 
@@ -42,7 +42,7 @@ Or call `idf.py` directly if you prefer.
 Project-level options live under **`esp32-ntp configuration`** in `menuconfig` (`make menuconfig`):
 
 - **Network**
-  - **Network interface**: **WIZnet W5500 Ethernet** or **WiFi STA**. Same behavior either way: NTP server on port 123 and HTTP stats on port 8080.
+  - **Network interface**: **WIZnet W5500 Ethernet** or **WiFi STA**. IP configuration works the same either way (DHCP or static). Hardware timestamping is only used on the W5500 path; WiFi uses the same GPS/PPS discipline without the W5500-specific transmit timing trick.
   - **IP config**: DHCP by default, or static IP, gateway, and netmask when **Use static IP** is enabled. Applies to whichever interface is selected.
   - With **WiFi STA**: set **WiFi SSID** and **WiFi password**.
 
@@ -70,12 +70,12 @@ Ethernet and GPS pin assignments are in `Config::getW5500*` and `Config::getGps*
   - Starts GPS/PPS disciplining (`GpsDiscipline`), the NTP server (`NtpServer`), and the stats HTTP server (`NtpStats`).
 
 - **NTP server**:
-  - Listens on a W5500 UDP socket (port 123).
+  - Listens on UDP port 123 on whichever interface is selected (W5500 Ethernet or WiFi STA).
   - Uses GPS PPS data and a monotonic timer to synthesize NTP timestamps in the 1900 epoch.
-  - Uses a non-blocking send path on the W5500 and may resend with a corrected transmit timestamp after ARP completes.
+  - On the W5500 path, uses a non-blocking send and may resend with a corrected transmit timestamp after ARP completes; on the WiFi path it uses a single send via the ESP-IDF lwIP stack.
 
 - **Stats HTTP server**:
-  - Listens on TCP port 8080 on the W5500.
+  - Listens on TCP port 8080 on whichever interface is selected (W5500 or WiFi).
   - Serves a Prometheus text exposition format with metrics such as:
     - `ntp_clock_offset_seconds`
     - `ntp_rms_offset_seconds`
@@ -93,8 +93,8 @@ Ethernet and GPS pin assignments are in `Config::getW5500*` and `Config::getGps*
 - `main/app_main.cpp` – system bring-up, component wiring, main loop.
 - `components/config` – pinout and configuration accessors (`Config::…`).
 - `components/gps` – GPS and PPS disciplining logic.
-- `components/ntp_server` – NTP server implementation over W5500 UDP.
-- `components/ntp_stats` – HTTP stats server over W5500 TCP.
+- `components/ntp_server` – NTP server implementation over W5500 UDP or WiFi UDP (lwIP), depending on the selected interface.
+- `components/ntp_stats` – HTTP stats server over W5500 TCP or WiFi TCP (lwIP), depending on the selected interface.
 - `components/w5500_eth` – W5500 SPI driver, DHCP and static IP handling, and PHY setup.
 - `components/wifi_sta` – WiFi STA with DHCP or static IP and `getIpAddr()` for stats server.
 - `components/w5k` – thin UDP/TCP wrapper API over the WIZnet ioLibrary sockets.
