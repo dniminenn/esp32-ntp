@@ -6,6 +6,7 @@
 #include "esp_err.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "driver/mcpwm_cap.h"
 
 struct GpsStats {
     double lastOffsetSec;     // last PPS-vs-system offset before correction
@@ -47,6 +48,8 @@ private:
   volatile uint64_t lastNmeaUpdateUs;
   volatile bool ppsPending;
   volatile uint64_t ppsEdgeUs;
+  volatile uint32_t ppsCapValue;
+  uint32_t prevPpsCapValue;
 
   // Statistics tracking
   double statLastOffsetSec;
@@ -71,11 +74,15 @@ private:
   double filteredFrequencyPpm;   // EWMA-smoothed frequency for dispersion calc
   double filteredRmsOffsetSec;   // outlier-immune RMS for dispersion calc
 
+  // MCPWM capture handles
+  mcpwm_cap_timer_handle_t capTimer;
+  mcpwm_cap_channel_handle_t capChannel;
+
   static void uart_task(void* arg);
   static bool parse_rmc_line(const char* line, int len, time_t& outUnixSec);
   static int from_hex(char c);
   static bool verify_nmea_checksum(const char* line, int len);
-  static void IRAM_ATTR pps_isr_handler(void* arg);
+  static bool IRAM_ATTR pps_capture_callback(mcpwm_cap_channel_handle_t cap_channel, const mcpwm_capture_event_data_t* edata, void* user_ctx);
   void handle_pps_deferred();
 };
 

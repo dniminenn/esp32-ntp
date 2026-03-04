@@ -50,3 +50,28 @@ int w5k_sendto_poll(uint8_t socket_num) {
   return 0;
 }
 
+int w5k_arp_prime(uint8_t socket_num, const uint8_t* ip) {
+  /* Send a 1-byte dummy to port 9 (discard protocol) to trigger
+     W5500 ARP resolution.  Block until SENDOK so the caller knows
+     the ARP cache is warm before stamping t3. */
+  uint8_t dummy = 0;
+  setSn_DIPR(socket_num, (uint8_t*)ip);
+  setSn_DPORT(socket_num, 9);           /* RFC 863 discard */
+  wiz_send_data(socket_num, &dummy, 1);
+  setSn_CR(socket_num, Sn_CR_SEND);
+  while (getSn_CR(socket_num));
+
+  for (int i = 0; i < 10000; i++) {     /* ~100-200ms worst case */
+    uint8_t ir = getSn_IR(socket_num);
+    if (ir & Sn_IR_SENDOK) {
+      setSn_IR(socket_num, Sn_IR_SENDOK);
+      return 0;
+    }
+    if (ir & Sn_IR_TIMEOUT) {
+      setSn_IR(socket_num, Sn_IR_TIMEOUT);
+      return -1;
+    }
+  }
+  return -1;
+}
+

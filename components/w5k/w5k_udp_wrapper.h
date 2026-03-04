@@ -17,6 +17,10 @@ int w5k_sendto_nb(uint8_t socket_num, const uint8_t* buf, uint16_t len, const ui
 // Poll for send completion: returns 1=done, 0=pending, -1=timeout
 int w5k_sendto_poll(uint8_t socket_num);
 
+// Prime ARP cache for destination IP by sending a 1-byte dummy.
+// Blocks until ARP resolves or times out.  Returns 0=ok, -1=timeout.
+int w5k_arp_prime(uint8_t socket_num, const uint8_t* ip);
+
 #ifdef __cplusplus
 }
 #endif
