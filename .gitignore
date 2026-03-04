@@ -1,0 +1,23 @@
+/build/
+/managed_components/
+
+# IDE/editor settings
+/.vscode/
+/.idea/
+
+# Temporary / OS files
+.DS_Store
+*~
+*.swp
+*.swo
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# ESP-IDF generated files we don't track
+/sdkconfig.old
+
+# Logs
+*.log
+

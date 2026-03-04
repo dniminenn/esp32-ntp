@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: MIT-0
+
+menu "esp32-ntp configuration"
+
+comment "Network"
+
+choice APP_NETWORK
+    prompt "Network interface"
+    default APP_NETWORK_WIZNET
+    help
+        Use WIZnet W5500 Ethernet or WiFi STA for DHCP, NTP server, and stats.
+
+config APP_NETWORK_WIZNET
+    bool "WIZnet W5500 Ethernet"
+
+config APP_NETWORK_WIFI
+    bool "WiFi STA"
+    depends on IDF_TARGET_ESP32
+    help
+        Use ESP32 WiFi station with DHCP. NTP and stats work the same as over Ethernet.
+
+endchoice
+
+config APP_WIFI_SSID
+    string "WiFi SSID"
+    default "myssid"
+    depends on APP_NETWORK_WIFI
+
+config APP_WIFI_PASSWORD
+    string "WiFi password"
+    default "mypassword"
+    depends on APP_NETWORK_WIFI
+
+config APP_USE_STATIC_IP
+    bool "Use static IP (disable DHCP)"
+    default n
+    depends on APP_NETWORK_WIZNET || APP_NETWORK_WIFI
+    help
+        When enabled, use the static IP, gateway, and netmask below. Applies to whichever network interface is selected.
+
+config APP_STATIC_IP_ADDR
+    string "Static IP address"
+    default "192.168.1.100"
+    depends on APP_USE_STATIC_IP
+
+config APP_STATIC_GW
+    string "Static gateway"
+    default "192.168.1.1"
+    depends on APP_USE_STATIC_IP
+
+config APP_STATIC_NETMASK
+    string "Static netmask"
+    default "255.255.255.0"
+    depends on APP_USE_STATIC_IP
+
+comment "NTP / timezone"
+
+config APP_NTP_SERVER
+    string "NTP server hostname/IP"
+    default "192.168.0.1"
+    help
+        NTP server to query for time synchronization.
+
+config APP_NTP_PORT
+    int "NTP server port"
+    range 1 65535
+    default 123
+
+config APP_TZ
+    string "Timezone (TZ string)"
+    default "AST4ADT,M3.2.0,M11.1.0"
+    help
+        POSIX TZ string, e.g. "EST5EDT,M3.2.0,M11.1.0".
+
+comment "SPI / Display"
+
+config APP_USE_DISPLAY
+    bool "Enable LED display"
+    default y
+
+config APP_USE_PRESYNC_GLYPH
+    bool "Show presync glyph before GPS lock"
+    default n
+    depends on APP_USE_DISPLAY
+
+config APP_SPI_HOST
+    int "SPI host device (SPI2_HOST=2, SPI3_HOST=3)"
+    range 1 3
+    default 2
+    help
+        ESP32 SPI host: 2 = HSPI, 3 = VSPI.
+
+config APP_SPI_MOSI_PIN
+    int "SPI MOSI GPIO"
+    range 0 39
+    default 23
+
+config APP_SPI_SCLK_PIN
+    int "SPI SCLK GPIO"
+    range 0 39
+    default 18
+
+config APP_CS_PIN
+    int "MAX7219 CS GPIO"
+    range 0 39
+    default 5
+
+config APP_MAX_DEVICES
+    int "MAX7219 cascade size"
+    range 1 8
+    default 4
+
+config APP_SPI_CLOCK_HZ
+    int "SPI clock (Hz)"
+    range 100000 26000000
+    default 10000000
+
+endmenu
+
