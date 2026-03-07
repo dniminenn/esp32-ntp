@@ -390,7 +390,13 @@ double GpsDiscipline::getRootDispersion() const {
   uint64_t now = esp_timer_get_time();
   double sincePpsSec = (double)(now - lastPpsMonotonicUs) / 1e6;
   // Use filtered (outlier-immune) RMS and frequency for stable dispersion
-  return fabs(filteredRmsOffsetSec) + fabs(filteredFrequencyPpm) * 1e-6 * sincePpsSec + 1e-6;
+  // NTP 16.16 fixed point formatting truncates values below 1/65536 (~15.25µs) to 0.
+  // We use a floor of 16µs so dispersion doesn't report as 0.000000.
+  return fabs(filteredRmsOffsetSec) + fabs(filteredFrequencyPpm) * 1e-6 * sincePpsSec + 16e-6;
+}
+
+double GpsDiscipline::getRootDelay() const {
+  return 15e-6;
 }
 
 void GpsDiscipline::loop() {

@@ -29,6 +29,7 @@ public:
   uint64_t getLastNmeaUpdateUs() const { return lastNmeaUpdateUs; }
   void getStats(GpsStats& out) const;
   double getRootDispersion() const;
+  double getRootDelay() const;
   void loop();
 
 private:

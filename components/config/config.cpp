@@ -32,7 +32,7 @@ static const int kGpsUartTxPin = 17; // not used by GPS NEO-6M
 static const int kGpsUartRxPin = 16; // GPS TX -> ESP RX
 static const int kPpsGpioPin = 19;   // PPS input (back to original pin!)
 // PPS offset calibration (microseconds, can be positive or negative)
-static const int64_t kPpsCalibrationUs = 3335;  // Fine-tuned to align with 192.168.0.23 reference
+static const int64_t kPpsCalibrationUs = 0;  // MCPWM hardware capture — no ISR latency to compensate
 
 // W5500 Ethernet on HSPI (SPI2_HOST) - separate bus from display
 static const spi_host_device_t kW5500SpiHost = SPI2_HOST;  // HSPI for W5500

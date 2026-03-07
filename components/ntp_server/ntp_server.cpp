@@ -141,8 +141,9 @@ void NtpServer::loop() {
     if (x > 4294967295.0) x = 4294967295.0;
     return (uint32_t)(x + 0.5);
   };
+  double rootDelay = (locked && gps) ? gps->getRootDelay() : 1.0;
   double dispersion = (locked && gps) ? gps->getRootDispersion() : 1.0;
-  wr32(rsp, 4, 0);
+  wr32(rsp, 4, to_fixed_16_16(rootDelay));
   wr32(rsp, 8, to_fixed_16_16(dispersion));
 
   if (locked) {
