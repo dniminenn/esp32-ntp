@@ -19,6 +19,7 @@ public:
   esp_err_t stop();
   void loop();
   bool isLinkUp() const;
+  uint8_t readVersion() const;   // W5500 VERSIONR (0x04 = healthy); for diagnostics
   esp_err_t getMacAddr(uint8_t mac[6]) const;
   bool getIpAddr(uint32_t& ip) const;
 

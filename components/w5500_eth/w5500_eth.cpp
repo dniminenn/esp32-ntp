@@ -6,6 +6,7 @@
 #include "esp_event.h"
 #include "esp_system.h"
 #include "esp_mac.h"
+#include "esp_timer.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
@@ -144,7 +145,7 @@ esp_err_t W5500Eth::begin(spi_host_device_t spiHost, int mosiPin, int misoPin, i
   }
   
   spi_device_interface_config_t devcfg = {};
-  devcfg.clock_speed_hz = 20 * 1000 * 1000;
+  devcfg.clock_speed_hz = clockHz;  // honor caller's requested SPI clock
   devcfg.mode = 0;
   devcfg.spics_io_num = -1;
   devcfg.queue_size = 7;
@@ -333,15 +334,41 @@ esp_err_t W5500Eth::stop() {
 }
 
 void W5500Eth::loop() {
-  bool newLinkUp = (wizphy_getphylink() == PHY_LINK_ON);
-  if (newLinkUp != linkUp) {
-    linkUp = newLinkUp;
-    ESP_LOGI(TAG, "Ethernet link %s", linkUp ? "up" : "down");
+  // Health watchdog. An unattended NTP server must self-recover from a wedged
+  // W5500 or a dropped link: the CPU and display keep running even when the
+  // chip dies, so nothing else would notice. This only ever acts when the
+  // network is already unusable and never touches the timekeeping path.
+  static int64_t lastCheckUs = 0;
+  static int64_t unhealthySinceUs = 0;
+  int64_t now = esp_timer_get_time();
+  if (now - lastCheckUs < 1000000) return;   // ~1 Hz is plenty
+  lastCheckUs = now;
+
+  bool chipOk = (getVERSIONR() == 0x04);      // SPI sanity — catches a wedged W5500
+  bool phyOk  = (wizphy_getphylink() == PHY_LINK_ON);
+  bool healthy = chipOk && phyOk;
+
+  if (healthy != linkUp) {
+    linkUp = healthy;
+    ESP_LOGI(TAG, "Ethernet link %s (chipOk=%d phyOk=%d)", linkUp ? "up" : "down", chipOk, phyOk);
+  }
+
+  if (healthy) {
+    unhealthySinceUs = 0;
+  } else if (unhealthySinceUs == 0) {
+    unhealthySinceUs = now;
+  } else if (now - unhealthySinceUs > 60000000) {   // 60s sustained outage
+    ESP_LOGE(TAG, "W5500 unhealthy >60s (chipOk=%d phyOk=%d) — restarting to recover", chipOk, phyOk);
+    esp_restart();
   }
 }
 
 bool W5500Eth::isLinkUp() const {
   return linkUp;
+}
+
+uint8_t W5500Eth::readVersion() const {
+  return getVERSIONR();   // 0x04 when healthy; anything else means the SPI link is wedged
 }
 
 esp_err_t W5500Eth::getMacAddr(uint8_t mac[6]) const {
