@@ -25,6 +25,20 @@ int w5k_set_nonblock(uint8_t socket_num) {
   return ctlsocket(socket_num, CS_SET_IOMODE, &mode);
 }
 
+int32_t w5k_rx_ready(uint8_t socket_num) {
+  return getSn_RX_RSR(socket_num);
+}
+
+void w5k_enable_rx_irq(uint8_t socket_num) {
+  // Route this socket's interrupts to the INTn pin, and enable only RECV.
+  setSIMR(getSIMR() | (uint8_t)(1 << socket_num));
+  setSn_IMR(socket_num, Sn_IR_RECV);
+}
+
+void w5k_clear_rx_irq(uint8_t socket_num) {
+  setSn_IR(socket_num, Sn_IR_RECV);
+}
+
 int w5k_sendto_nb(uint8_t socket_num, const uint8_t* buf, uint16_t len, const uint8_t* to_ip, uint16_t to_port) {
   setSn_DIPR(socket_num, (uint8_t*)to_ip);
   setSn_DPORT(socket_num, to_port);

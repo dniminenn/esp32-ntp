@@ -10,6 +10,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
+#include "nvs.h"
+#include "esp_system.h"
 #include "esp_netif.h"
 #include "driver/uart.h"
 #include "esp_pm.h"
@@ -31,6 +33,14 @@ static NtpStats* g_ntpStats = nullptr;
 static W5500Eth* g_ethernet = nullptr;
 static WifiSta* g_wifi = nullptr;
 static SemaphoreHandle_t g_displayMutex = nullptr;
+
+// Diagnostics exposed over /metrics (read-only; never on the timekeeping path).
+// g_mainLoopBeats advances every core-0 loop iteration — if it stalls between
+// two HTTP scrapes the loop is wedged; g_bootCount (persisted in NVS) counts
+// boots, so an auto-recovery (watchdog reboot / W5500 restart) is visible
+// remotely without attaching a serial monitor.
+volatile uint32_t g_mainLoopBeats = 0;
+uint32_t g_bootCount = 0;
 
 extern "C" void app_main();
 
@@ -98,7 +108,21 @@ void app_main() {
   ESP_LOGI(TAG, "=== Clock Starting ===");
   ESP_LOGI(TAG, "Initializing NVS...");
   ESP_ERROR_CHECK(nvs_flash_init());
-  
+
+  // Persisted boot counter — a jump between scrapes reveals an auto-recovery
+  // (watchdog reboot or W5500 restart) without needing a serial console.
+  {
+    nvs_handle_t h;
+    if (nvs_open("diag", NVS_READWRITE, &h) == ESP_OK) {
+      nvs_get_u32(h, "boots", &g_bootCount);
+      g_bootCount++;
+      nvs_set_u32(h, "boots", g_bootCount);
+      nvs_commit(h);
+      nvs_close(h);
+    }
+    ESP_LOGI(TAG, "Boot count: %u, reset reason: %d", (unsigned)g_bootCount, (int)esp_reset_reason());
+  }
+
   // Set a reasonable initial time to avoid massive NTP corrections
   struct timeval tv;
   gettimeofday(&tv, nullptr);
@@ -134,7 +158,7 @@ void app_main() {
       Config::getW5500CsPin(),
       Config::getW5500IntPin(),
       Config::getW5500RstPin(),
-      20000000
+      20000000  // known-good SPI clock for this wiring
     );
     if (err == ESP_OK) {
       ESP_LOGI(TAG, "W5500 initialized, starting Ethernet...");
@@ -218,9 +242,11 @@ void app_main() {
   unsigned int loopCount = 0;
   bool mainDiag = true;
   while (true) {
+    g_mainLoopBeats++;   // liveness heartbeat (read over /metrics)
+
     // Process GPS PPS events with highest priority
     if (g_gps) g_gps->loop();
-    
+
     // Process NTP requests (time-critical)
     if (g_ntpServer) g_ntpServer->loop();
     

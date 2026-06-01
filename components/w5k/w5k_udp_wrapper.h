@@ -12,6 +12,16 @@ int32_t w5k_recvfrom(uint8_t socket_num, uint8_t* buf, uint16_t len, uint8_t* fr
 int32_t w5k_sendto(uint8_t socket_num, const uint8_t* buf, uint16_t len, const uint8_t* to_ip, uint16_t to_port);
 int w5k_set_nonblock(uint8_t socket_num);
 
+// Cheap "bytes waiting in RX buffer" check (reads Sn_RX_RSR only, no payload
+// read). Lets the caller timestamp packet arrival before the SPI payload read.
+int32_t w5k_rx_ready(uint8_t socket_num);
+
+// Enable the W5500 RECV interrupt for this socket so the INTn pin asserts on
+// packet arrival (drives a GPIO ISR for hardware-accurate RX timestamping).
+void w5k_enable_rx_irq(uint8_t socket_num);
+// Acknowledge/clear the RECV interrupt so INTn de-asserts and can fire again.
+void w5k_clear_rx_irq(uint8_t socket_num);
+
 // Non-blocking UDP send: initiate send (returns 0 on success, -1 on error)
 int w5k_sendto_nb(uint8_t socket_num, const uint8_t* buf, uint16_t len, const uint8_t* to_ip, uint16_t to_port);
 // Poll for send completion: returns 1=done, 0=pending, -1=timeout

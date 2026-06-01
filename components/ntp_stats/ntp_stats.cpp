@@ -12,8 +12,14 @@
 #include <fcntl.h>
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "lwip/sockets.h"
 #include "w5k_tcp_wrapper.h"
+
+// Liveness/boot diagnostics published by app_main (read-only here).
+extern volatile uint32_t g_mainLoopBeats;
+extern uint32_t g_bootCount;
 
 static const char* TAG = "NTP_STATS";
 
@@ -199,11 +205,22 @@ void NtpStats::handleConnection() {
   if (gps) gps->getStats(gs);
   bool locked = (gps && gps->isLocked());
   uint32_t reqCount = ntp ? ntp->getRequestCount() : 0;
+  uint32_t rxIrqCount = ntp ? ntp->getRxIrqCount() : 0;
+  double txCorrUs = ntp ? ntp->getTxCorrectionUs() : 0.0;
   double uptimeSec = (double)esp_timer_get_time() / 1e6;
   int stratum = locked ? 1 : 16;
   double rootDispersion = gps ? gps->getRootDispersion() : 1.0;
 
-  static char resp[1792];
+  // Diagnostics (read-only; not on the timekeeping path).
+  int resetReason     = (int)esp_reset_reason();
+  uint32_t freeHeap   = (uint32_t)esp_get_free_heap_size();
+  uint32_t minFreeHeap= (uint32_t)esp_get_minimum_free_heap_size();
+  uint32_t loopBeats  = g_mainLoopBeats;
+  uint32_t bootCount  = g_bootCount;
+  int ethLink         = eth ? (eth->isLinkUp() ? 1 : 0) : -1;
+  int w5500Ver        = eth ? (int)eth->readVersion() : -1;
+
+  static char resp[3072];
   static const int hdrReserve = 128;
   char* body = resp + hdrReserve;
   int blen = snprintf(body, sizeof(resp) - hdrReserve,
@@ -239,7 +256,34 @@ void NtpStats::handleConnection() {
     "ntp_pps_count %" PRIu32 "\n"
     "# HELP ntp_pps_rejects_total PPS pulses rejected as outliers\n"
     "# TYPE ntp_pps_rejects_total counter\n"
-    "ntp_pps_rejects_total %" PRIu32 "\n",
+    "ntp_pps_rejects_total %" PRIu32 "\n"
+    "# HELP ntp_rx_irq_total W5500 RX interrupts captured (hardware arrival edges)\n"
+    "# TYPE ntp_rx_irq_total counter\n"
+    "ntp_rx_irq_total %" PRIu32 "\n"
+    "# HELP ntp_tx_correction_us Self-calibrated transmit-path correction added to t3\n"
+    "# TYPE ntp_tx_correction_us gauge\n"
+    "ntp_tx_correction_us %.1f\n"
+    "# HELP ntp_reset_reason esp_reset_reason() of the last boot (1=POWERON,4=SW,7=TASK_WDT,8=INT_WDT,9=BROWNOUT)\n"
+    "# TYPE ntp_reset_reason gauge\n"
+    "ntp_reset_reason %d\n"
+    "# HELP ntp_boot_count Boots since flash (persisted in NVS; a jump = auto-recovery)\n"
+    "# TYPE ntp_boot_count counter\n"
+    "ntp_boot_count %" PRIu32 "\n"
+    "# HELP ntp_main_loop_beats Core-0 main-loop iterations (liveness heartbeat)\n"
+    "# TYPE ntp_main_loop_beats counter\n"
+    "ntp_main_loop_beats %" PRIu32 "\n"
+    "# HELP ntp_free_heap_bytes Current free heap\n"
+    "# TYPE ntp_free_heap_bytes gauge\n"
+    "ntp_free_heap_bytes %" PRIu32 "\n"
+    "# HELP ntp_min_free_heap_bytes Lowest free heap since boot\n"
+    "# TYPE ntp_min_free_heap_bytes gauge\n"
+    "ntp_min_free_heap_bytes %" PRIu32 "\n"
+    "# HELP ntp_eth_link_up W5500 link health (1=up,0=down,-1=n/a)\n"
+    "# TYPE ntp_eth_link_up gauge\n"
+    "ntp_eth_link_up %d\n"
+    "# HELP ntp_w5500_version W5500 VERSIONR (4=healthy; other=wedged SPI; -1=n/a)\n"
+    "# TYPE ntp_w5500_version gauge\n"
+    "ntp_w5500_version %d\n",
     gs.lastOffsetSec,
     gs.rmsOffsetSec,
     gs.frequencyPpm,
@@ -250,7 +294,16 @@ void NtpStats::handleConnection() {
     uptimeSec,
     reqCount,
     gs.ppsCount,
-    gs.ppsRejectCount
+    gs.ppsRejectCount,
+    rxIrqCount,
+    txCorrUs,
+    resetReason,
+    bootCount,
+    loopBeats,
+    freeHeap,
+    minFreeHeap,
+    ethLink,
+    w5500Ver
   );
 
   if (blen < 0 || blen >= (int)(sizeof(resp) - hdrReserve)) {
@@ -276,7 +329,17 @@ void NtpStats::handleConnection() {
     close(client_sock);
     client_sock = -1;
   } else {
-    w5k_tcp_send((uint8_t)sock, (const uint8_t*)resp, (uint16_t)totalLen);
+    // The W5500 socket TX buffer is 2KB; send in <=1KB chunks so a response
+    // larger than the buffer can't stall the ioLibrary send (it waits for
+    // SENDOK between chunks, so this is safe to chain).
+    int off = 0;
+    while (off < totalLen) {
+      int chunk = totalLen - off;
+      if (chunk > 1024) chunk = 1024;
+      int32_t r = w5k_tcp_send((uint8_t)sock, (const uint8_t*)resp + off, (uint16_t)chunk);
+      if (r <= 0) break;   // socket closed/errored — stop rather than spin
+      off += r;
+    }
     w5k_tcp_disconnect((uint8_t)sock);
     disconnecting = true;
   }
