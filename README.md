@@ -1,5 +1,7 @@
 # esp32-ntp: a GPS-disciplined Stratum 1 NTP server for the ESP32
 
+**Writeup:** [Building a GPS stratum 1 NTP server on an ESP32](https://dnim.dev/blog/esp32-stratum-1-ntp)
+
 Turn an ESP32 and a cheap GPS module into a **Stratum 1 NTP time server** that hands out
 sub-microsecond-grade time over **Ethernet (WIZnet W5500)** or **Wi-Fi**. PPS edges from the
 GPS are captured in hardware, so the clock is disciplined with nanosecond resolution and no
