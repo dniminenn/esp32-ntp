@@ -195,6 +195,15 @@ void NtpServer::loop() {
     return;
   }
 
+  // Only answer client requests (mode 3; mode 0 for ancient v3 hosts).
+  // Replying to anything else — e.g. a spoofed mode-4 server response —
+  // invites reflection loops between servers.
+  uint8_t reqMode = req[0] & 0x07;
+  if (reqMode != 3 && reqMode != 0) {
+    ESP_LOGD(TAG, "Ignoring mode-%d packet from %d.%d.%d.%d", reqMode, from_ip[0], from_ip[1], from_ip[2], from_ip[3]);
+    return;
+  }
+
   bool locked = (gps && gps->isLocked());
 
   uint8_t rsp[48];
@@ -268,7 +277,13 @@ void NtpServer::loop() {
   // MAC is resolved. Skipping it leaves Sn_TX_RD stuck while Sn_TX_WR grows, so
   // every reply becomes an oversized/garbage packet. arp_prime blocks until the
   // ARP is warm, after which the real send departs promptly.
-  w5k_arp_prime((uint8_t)sock, from_ip);
+  // If ARP can't resolve (spoofed or unroutable source), drop the reply — the
+  // real send would stall the same way and the answer would go nowhere anyway.
+  if (w5k_arp_prime((uint8_t)sock, from_ip) != 0) {
+    ESP_LOGW(TAG, "ARP unresolved for %d.%d.%d.%d — dropping reply",
+             from_ip[0], from_ip[1], from_ip[2], from_ip[3]);
+    return;
+  }
 
   // Stamp t3, pre-corrected by the measured send duration so it reflects wire
   // egress rather than the pre-send instant (ARP is already warm here).

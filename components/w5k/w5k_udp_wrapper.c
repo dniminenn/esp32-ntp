@@ -67,7 +67,18 @@ int w5k_sendto_poll(uint8_t socket_num) {
 int w5k_arp_prime(uint8_t socket_num, const uint8_t* ip) {
   /* Send a 1-byte dummy to port 9 (discard protocol) to trigger
      W5500 ARP resolution.  Block until SENDOK so the caller knows
-     the ARP cache is warm before stamping t3. */
+     the ARP cache is warm before stamping t3.
+
+     A spoofed/unroutable source must not stall the main loop (which also
+     services PPS disciplining and DHCP) for the chip's default ~1.8s ARP
+     retry budget, so shrink RTR/RCR for the prime: 40ms/try x 2 tries
+     ~= 80ms worst case, then restore.  A live LAN host answers ARP in
+     well under 40ms. */
+  uint16_t rtr = getRTR();
+  uint8_t rcr = getRCR();
+  setRTR(400);   /* 40ms per try (unit 100us) */
+  setRCR(1);     /* 1 retry -> ~80ms to TIMEOUT */
+
   uint8_t dummy = 0;
   setSn_DIPR(socket_num, (uint8_t*)ip);
   setSn_DPORT(socket_num, 9);           /* RFC 863 discard */
@@ -75,17 +86,22 @@ int w5k_arp_prime(uint8_t socket_num, const uint8_t* ip) {
   setSn_CR(socket_num, Sn_CR_SEND);
   while (getSn_CR(socket_num));
 
-  for (int i = 0; i < 10000; i++) {     /* ~100-200ms worst case */
+  int ret = -1;
+  for (int i = 0; i < 20000; i++) {     /* backstop; TIMEOUT IR fires first */
     uint8_t ir = getSn_IR(socket_num);
     if (ir & Sn_IR_SENDOK) {
       setSn_IR(socket_num, Sn_IR_SENDOK);
-      return 0;
+      ret = 0;
+      break;
     }
     if (ir & Sn_IR_TIMEOUT) {
       setSn_IR(socket_num, Sn_IR_TIMEOUT);
-      return -1;
+      break;
     }
   }
-  return -1;
+
+  setRTR(rtr);
+  setRCR(rcr);
+  return ret;
 }
 
