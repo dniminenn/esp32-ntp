@@ -10,13 +10,23 @@
 
 static const char* TAG = "GPS";
 
+// Holdover policy: after GPS is lost the clock coasts on the disciplined
+// oscillator. We keep claiming sync (stratum 1) while the predicted error
+// stays bounded, with root dispersion growing to tell clients honestly.
+static const int64_t kFreshPpsUs = 2500000;            // disciplining considered live within 2.5s of a good PPS
+static const double  kHoldoverDriftFloorPpm = 1.0;     // assume >=1ppm drift in holdover (temperature dominates)
+static const double  kHoldoverMaxDispersionSec = 0.01; // drop the lock once predicted error exceeds 10ms
+static const int64_t kHoldoverMaxUs = 3600LL * 1000000LL; // ...or after 1 hour, whichever first
+
 static uint32_t unix_to_ntp_seconds(time_t unixSec) {
   return (uint32_t)((uint64_t)unixSec + 2208988800ULL);
 }
 
 GpsDiscipline::GpsDiscipline()
   : uartPort(-1), baud(0), txPin(-1), rxPin(-1), ppsGpio(-1),
-    gpsLock(false), lastPpsSec1900(0), lastPpsFrac(0), lastPpsMonotonicUs(0),
+    gpsLock(false), holdover(false), lastGoodPpsUs(0), lockExpiredLogged(false),
+    statMispairCount(0), mispairStreak(0),
+    lastPpsSec1900(0), lastPpsFrac(0), lastPpsMonotonicUs(0),
     lastNmeaUnixSec(0), lastNmeaUpdateUs(0), ppsPending(false), ppsEdgeUs(0),
     ppsCapValue(0), prevPpsCapValue(0),
     statLastOffsetSec(0), statRmsOffsetSec(0), statFrequencyPpm(0),
@@ -199,14 +209,44 @@ void GpsDiscipline::handle_pps_deferred() {
   ppsPending = false;
   uint64_t ppsEdgeCapture = ppsEdgeUs;
   uint32_t capValue = ppsCapValue;
-  lastPpsMonotonicUs = ppsEdgeCapture;
 
   uint64_t nowUs = esp_timer_get_time();
   uint64_t ageUs = nowUs - lastNmeaUpdateUs;
   bool wasLocked = gpsLock;
-  
+
   if (ageUs < 1500000ULL && lastNmeaUnixSec > 0) {
     time_t ppsSec = lastNmeaUnixSec + 1;
+
+    // --- PPS/NMEA mispair guard ---
+    // ppsSec assumes the freshest RMC sentence describes the *previous*
+    // second. If the receiver ever emits a sentence late, this PPS can pair
+    // with a sentence one second stale and we'd serve time exactly 1s off —
+    // confidently, at stratum 1. Once disciplined, the running clock is
+    // accurate to microseconds, so any candidate that disagrees by more than
+    // 0.5s is a mispair, not a real step. Skip it; holdover covers the gap.
+    // If the disagreement persists it's genuine (someone stepped the clock) —
+    // accept so we converge instead of free-running forever.
+    if (gpsLock) {
+      struct timeval curTv;
+      gettimeofday(&curTv, nullptr);
+      double sysAtEdgeSec = (double)curTv.tv_sec + (double)curTv.tv_usec / 1e6
+                          - (double)(int64_t)(esp_timer_get_time() - ppsEdgeCapture) / 1e6;
+      double pairDiff = (double)ppsSec - sysAtEdgeSec;
+      if (fabs(pairDiff) > 0.5) {
+        statMispairCount++;
+        mispairStreak++;
+        if (mispairStreak < 3) {
+          ESP_LOGW(TAG, "PPS/NMEA mispair suspected (%+.3fs step) — pulse skipped (%d/3)",
+                   pairDiff, mispairStreak);
+          prevPpsCapValue = capValue;   // keep interval tracking continuous
+          prevPpsMonotonicUs = ppsEdgeCapture;
+          lastAppliedTotalCorrUs = 0;
+          return;
+        }
+        ESP_LOGE(TAG, "%+.3fs step persisted %d pulses — accepting as genuine", pairDiff, mispairStreak);
+      }
+      mispairStreak = 0;
+    }
 
     // --- PPS outlier rejection gate ---
     // Detect missed or spurious PPS by checking interval sanity.
@@ -261,6 +301,17 @@ void GpsDiscipline::handle_pps_deferred() {
     }
     lastPpsSec1900 = unix_to_ntp_seconds((time_t)adjustedPpsSec);
     lastPpsFrac = (uint32_t)(((uint64_t)adjustedPpsFracUs << 32) / 1000000ULL);
+    // Anchor pair for NTP timestamp extrapolation — must only advance together
+    // with lastPpsSec1900/lastPpsFrac (a holdover pulse must not move it).
+    lastPpsMonotonicUs = ppsEdgeCapture;
+
+    if (holdover) {
+      ESP_LOGI(TAG, "GPS holdover ended after %.0fs — re-disciplined",
+               (double)((int64_t)ppsEdgeCapture - lastGoodPpsUs) / 1e6);
+      holdover = false;
+    }
+    lastGoodPpsUs = (int64_t)ppsEdgeCapture;
+    lockExpiredLogged = false;
 
     gpsLock = true;
     if (!wasLocked) {
@@ -360,19 +411,17 @@ void GpsDiscipline::handle_pps_deferred() {
       freqWindowSamples = 0;
     }
   } else {
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    tv.tv_usec = 0;
-    settimeofday(&tv, nullptr);
-    lastPpsSec1900 = unix_to_ntp_seconds(tv.tv_sec);
-    lastPpsFrac = 0;
+    // PPS with stale/absent NMEA: leave the system clock alone. It is
+    // disciplined to the measured frequency error and coasts far better than
+    // the old behavior here (truncating tv_usec could inject ~1s of error in
+    // one call). The NTP anchor stays frozen at the last good pulse;
+    // computeNtpTimestamp extrapolates with frequency feedforward, and loop()
+    // declares holdover / expires the lock as the error bound grows.
     prevPpsEdgeForOffset = 0;
     prevPpsCapValue = 0;
     lastAppliedTotalCorrUs = 0;
-    if (wasLocked) {
-      ESP_LOGW(TAG, "GPS lock lost - NMEA stale or missing");
-    }
-    gpsLock = false;
+    mispairStreak = 0;
+    (void)wasLocked;
   }
 }
 
@@ -383,16 +432,32 @@ void GpsDiscipline::getStats(GpsStats& out) const {
   out.ppsJitterSec = statPpsJitterSec;
   out.ppsCount = statPpsCount;
   out.ppsRejectCount = ppsRejectCount;
+  out.nmeaMispairCount = statMispairCount;
+  out.holdover = (gpsLock && holdover);
 }
 
 double GpsDiscipline::getRootDispersion() const {
   if (!gpsLock) return 1.0;
-  uint64_t now = esp_timer_get_time();
-  double sincePpsSec = (double)(now - lastPpsMonotonicUs) / 1e6;
+  // Grow from the last *disciplined* pulse (not merely the last PPS edge), so
+  // holdover — GPS pulsing without valid NMEA included — is reported honestly.
+  double sinceGoodSec = (double)(esp_timer_get_time() - lastGoodPpsUs) / 1e6;
+  double driftPpm = fabs(filteredFrequencyPpm);
+  // The calibrated estimate only holds near the calibration temperature; once
+  // coasting, floor the assumed drift so dispersion doesn't stay optimistic.
+  if (sinceGoodSec > (double)kFreshPpsUs / 1e6) driftPpm = fmax(driftPpm, kHoldoverDriftFloorPpm);
   // Use filtered (outlier-immune) RMS and frequency for stable dispersion
   // NTP 16.16 fixed point formatting truncates values below 1/65536 (~15.25µs) to 0.
   // We use a floor of 16µs so dispersion doesn't report as 0.000000.
-  return fabs(filteredRmsOffsetSec) + fabs(filteredFrequencyPpm) * 1e-6 * sincePpsSec + 16e-6;
+  return fabs(filteredRmsOffsetSec) + driftPpm * 1e-6 * sinceGoodSec + 16e-6;
+}
+
+bool GpsDiscipline::isLocked() const {
+  if (!gpsLock) return false;
+  int64_t sinceGoodUs = esp_timer_get_time() - lastGoodPpsUs;
+  if (sinceGoodUs < kFreshPpsUs) return true;
+  // Holdover: keep claiming sync while the predicted error stays bounded.
+  if (sinceGoodUs > kHoldoverMaxUs) return false;
+  return getRootDispersion() < kHoldoverMaxDispersionSec;
 }
 
 double GpsDiscipline::getRootDelay() const {
@@ -401,6 +466,19 @@ double GpsDiscipline::getRootDelay() const {
 
 void GpsDiscipline::loop() {
   handle_pps_deferred();
+
+  if (!gpsLock) return;
+  int64_t sinceGoodUs = esp_timer_get_time() - lastGoodPpsUs;
+  if (!holdover && sinceGoodUs > kFreshPpsUs) {
+    // Covers both stale-NMEA (PPS still pulsing) and PPS-dead outages.
+    holdover = true;
+    ESP_LOGW(TAG, "GPS holdover: no discipline for %.1fs — coasting on oscillator (%.3f ppm)",
+             (double)sinceGoodUs / 1e6, filteredFrequencyPpm);
+  }
+  if (holdover && !lockExpiredLogged && !isLocked()) {
+    lockExpiredLogged = true;
+    ESP_LOGE(TAG, "GPS holdover expired — now serving unsynchronized (stratum 16)");
+  }
 }
 
 

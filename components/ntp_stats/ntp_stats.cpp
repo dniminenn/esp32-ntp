@@ -257,6 +257,12 @@ void NtpStats::handleConnection() {
     "# HELP ntp_pps_rejects_total PPS pulses rejected as outliers\n"
     "# TYPE ntp_pps_rejects_total counter\n"
     "ntp_pps_rejects_total %" PRIu32 "\n"
+    "# HELP ntp_nmea_mispair_total PPS pulses skipped as suspected PPS/NMEA second mispairs\n"
+    "# TYPE ntp_nmea_mispair_total counter\n"
+    "ntp_nmea_mispair_total %" PRIu32 "\n"
+    "# HELP ntp_gps_holdover 1 when coasting on the oscillator (GPS lost, sync still credible)\n"
+    "# TYPE ntp_gps_holdover gauge\n"
+    "ntp_gps_holdover %d\n"
     "# HELP ntp_rx_irq_total W5500 RX interrupts captured (hardware arrival edges)\n"
     "# TYPE ntp_rx_irq_total counter\n"
     "ntp_rx_irq_total %" PRIu32 "\n"
@@ -295,6 +301,8 @@ void NtpStats::handleConnection() {
     reqCount,
     gs.ppsCount,
     gs.ppsRejectCount,
+    gs.nmeaMispairCount,
+    gs.holdover ? 1 : 0,
     rxIrqCount,
     txCorrUs,
     resetReason,

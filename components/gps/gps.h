@@ -15,13 +15,15 @@ struct GpsStats {
     double ppsJitterSec;      // inter-PPS interval jitter (sigma)
     uint32_t ppsCount;        // total PPS edges received
     uint32_t ppsRejectCount;  // PPS pulses rejected as outliers
+    uint32_t nmeaMispairCount;// PPS pulses skipped as PPS/NMEA second mispairs
+    bool holdover;            // coasting on the oscillator (GPS lost, still credible)
 };
 
 class GpsDiscipline {
 public:
   GpsDiscipline();
   esp_err_t begin(int uartPort, int baud, int txPin, int rxPin, int ppsGpio);
-  bool isLocked() const { return gpsLock; }
+  bool isLocked() const;   // true while disciplined OR in credible holdover
   // Get last PPS in NTP epoch seconds and fractional 32-bit
   bool getLastPps(uint32_t& sec1900, uint32_t& frac) const;
   uint64_t getLastPpsMonotonicUs() const { return lastPpsMonotonicUs; }
@@ -42,6 +44,11 @@ private:
 
   // State
   volatile bool gpsLock;
+  volatile bool holdover;          // GPS lost but oscillator prediction still credible
+  volatile int64_t lastGoodPpsUs;  // monotonic time of last full discipline (PPS + fresh NMEA)
+  bool lockExpiredLogged;          // one-shot log gate for holdover expiry
+  uint32_t statMispairCount;       // PPS/NMEA mispairs skipped
+  uint8_t mispairStreak;           // consecutive mispairs (persistent step accepted)
   volatile uint32_t lastPpsSec1900;
   volatile uint32_t lastPpsFrac;
   volatile uint64_t lastPpsMonotonicUs;
