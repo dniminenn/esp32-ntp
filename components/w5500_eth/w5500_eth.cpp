@@ -101,7 +101,7 @@ static void wizchip_writeburst(uint8_t* pBuf, uint16_t len) {
 }
 
 W5500Eth::W5500Eth()
-  : eth_netif(nullptr), linkUp(false), intPin(-1), rstPin(-1) {
+  : eth_netif(nullptr), linkUp(false), useDhcp(false), intPin(-1), rstPin(-1) {
 }
 
 W5500Eth::~W5500Eth() {
@@ -223,25 +223,11 @@ esp_err_t W5500Eth::start(bool use_static_ip,
                          const char* static_netmask) {
   ESP_LOGI(TAG, "Starting Ethernet...");
 
-  int retry = 0;
-  while (retry < 50) {
-    if (wizphy_getphylink() == PHY_LINK_ON) {
-      linkUp = true;
-      ESP_LOGI(TAG, "Ethernet link is up");
-      break;
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
-    retry++;
-  }
-
-  if (!linkUp) {
-    ESP_LOGW(TAG, "No Ethernet link detected");
-    return ESP_ERR_TIMEOUT;
-  }
-
   wiz_NetInfo netinfo = {};
   getSHAR(netinfo.mac);
 
+  // Apply static config before waiting for link — the W5500 registers don't
+  // need a live PHY, so a boot with the cable unplugged still ends up usable.
   if (use_static_ip && static_ip && static_gw && static_netmask) {
     uint8_t ip[4], gw[4], sn[4];
     if (parse_ip4(static_ip, ip) && parse_ip4(static_gw, gw) && parse_ip4(static_netmask, sn)) {
@@ -262,7 +248,26 @@ esp_err_t W5500Eth::start(bool use_static_ip,
     }
   }
 
-  if (!use_static_ip) {
+  useDhcp = !use_static_ip;
+
+  int retry = 0;
+  while (retry < 50) {
+    if (wizphy_getphylink() == PHY_LINK_ON) {
+      linkUp = true;
+      ESP_LOGI(TAG, "Ethernet link is up");
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+    retry++;
+  }
+
+  if (!linkUp) {
+    // Not fatal: loop() watches the PHY and kicks off DHCP when a cable shows up.
+    ESP_LOGW(TAG, "No Ethernet link detected; will configure when link comes up");
+    return ESP_ERR_TIMEOUT;
+  }
+
+  if (useDhcp) {
     ESP_LOGI(TAG, "Starting DHCP on W5500...");
     DHCP_init(DHCP_SOCKET_NUM, s_dhcp_buf);
     reg_dhcp_cbfunc(nullptr, nullptr, nullptr);
@@ -302,7 +307,7 @@ esp_err_t W5500Eth::start(bool use_static_ip,
                netinfo.gw[0], netinfo.gw[1], netinfo.gw[2], netinfo.gw[3],
                netinfo.sn[0], netinfo.sn[1], netinfo.sn[2], netinfo.sn[3]);
     } else {
-      ESP_LOGW(TAG, "DHCP failed (state=%d), falling back to static IP", dhcpState);
+      ESP_LOGW(TAG, "DHCP failed (state=%d), falling back to static IP; DHCP keeps retrying in background", dhcpState);
       uint8_t ip[4] = {192, 168, 1, 2};
       uint8_t sn[4] = {255, 255, 255, 0};
       uint8_t gw[4] = {192, 168, 1, 1};
@@ -345,20 +350,46 @@ void W5500Eth::loop() {
   lastCheckUs = now;
 
   bool chipOk = (getVERSIONR() == 0x04);      // SPI sanity — catches a wedged W5500
-  bool phyOk  = (wizphy_getphylink() == PHY_LINK_ON);
+  bool phyOk  = chipOk && (wizphy_getphylink() == PHY_LINK_ON);
   bool healthy = chipOk && phyOk;
 
   if (healthy != linkUp) {
+    ESP_LOGI(TAG, "Ethernet link %s (chipOk=%d phyOk=%d)", healthy ? "up" : "down", chipOk, phyOk);
+    if (healthy && useDhcp) {
+      // Cable replugged (possibly into a different network) — restart the DHCP
+      // state machine so we reacquire instead of squatting on a stale lease.
+      ESP_LOGI(TAG, "Link restored, restarting DHCP");
+      DHCP_init(DHCP_SOCKET_NUM, s_dhcp_buf);
+    }
     linkUp = healthy;
-    ESP_LOGI(TAG, "Ethernet link %s (chipOk=%d phyOk=%d)", linkUp ? "up" : "down", chipOk, phyOk);
   }
 
-  if (healthy) {
+  // Service the DHCP client at ~1 Hz. Renewal at T1, rebinding, and
+  // reacquisition after NAK all happen inside DHCP_run() — it just has to
+  // keep being called for the lifetime of the lease, not only at boot.
+  if (useDhcp && linkUp) {
+    DHCP_time_handler();
+    uint8_t st = DHCP_run();
+    if (st == DHCP_IP_ASSIGN || st == DHCP_IP_CHANGED) {
+      wiz_NetInfo ni = {};
+      wizchip_getnetinfo(&ni);
+      ESP_LOGI(TAG, "DHCP %s: %d.%d.%d.%d  GW: %d.%d.%d.%d  lease: %us",
+               st == DHCP_IP_CHANGED ? "renewed (IP changed)" : "acquired",
+               ni.ip[0], ni.ip[1], ni.ip[2], ni.ip[3],
+               ni.gw[0], ni.gw[1], ni.gw[2], ni.gw[3],
+               (unsigned)getDHCPLeasetime());
+    }
+  }
+
+  // Reboot only for a wedged chip (dead SPI). A merely unplugged cable must
+  // not restart the clock — timekeeping is still valid and the link recovery
+  // above handles the replug.
+  if (chipOk) {
     unhealthySinceUs = 0;
   } else if (unhealthySinceUs == 0) {
     unhealthySinceUs = now;
   } else if (now - unhealthySinceUs > 60000000) {   // 60s sustained outage
-    ESP_LOGE(TAG, "W5500 unhealthy >60s (chipOk=%d phyOk=%d) — restarting to recover", chipOk, phyOk);
+    ESP_LOGE(TAG, "W5500 unresponsive >60s — restarting to recover");
     esp_restart();
   }
 }

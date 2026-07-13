@@ -26,6 +26,7 @@ public:
 private:
   esp_netif_t* eth_netif;
   bool linkUp;
+  bool useDhcp;
   int intPin;
   int rstPin;
 };
