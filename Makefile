@@ -1,6 +1,6 @@
 SHELL := /usr/bin/bash
 
-# SPDX-License-Identifier: MIT-0
+# SPDX-License-Identifier: Unlicense
 
 # Adjust if your ESP-IDF lives elsewhere
 IDF_PATH ?= /home/jr/esp/esp-idf

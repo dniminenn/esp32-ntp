@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Unlicense
 
 #include "gps.h"
 #include "config.h"

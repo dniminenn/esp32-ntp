@@ -218,6 +218,6 @@ cable.
 
 ## License
 
-All original code in this repository is licensed under **MIT No Attribution (MIT-0)**, see `LICENSE`.
+All original code in this repository is released into the public domain under **The Unlicense**, see `LICENSE`.
 The `ioLibrary_Driver` submodule and other bundled third-party components retain their own upstream
 licenses.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Unlicense
 // main/app_main.cpp
 
 #include <string.h>

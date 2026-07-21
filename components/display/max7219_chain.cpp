@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Unlicense
 
 #include "max7219_chain.h"
 #include "driver/gpio.h"

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Unlicense
 #pragma once
 #include <stdint.h>
 #include "max7219_chain.h"

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Unlicense
 
 #include "wifi_sta.h"
 #include "esp_log.h"

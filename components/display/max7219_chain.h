@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Unlicense
 #pragma once
 #include <stdint.h>
 #include "driver/spi_master.h"

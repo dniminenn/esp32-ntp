@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT-0
+// SPDX-License-Identifier: Unlicense
 
 #include "w5k_tcp_wrapper.h"
 #include "wizchip_conf.h"
