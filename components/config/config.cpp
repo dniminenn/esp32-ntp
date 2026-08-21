@@ -34,6 +34,10 @@ int getGpsUartRxPin() { return cfg_int(CFG_GPS_RX); }
 int getPpsGpioPin() { return cfg_int(CFG_PPS_GPIO); }
 int64_t getPpsCalibrationUs() { return (int64_t)cfg_int(CFG_PPS_CAL); }
 
+int getRtcSdaPin() { return cfg_int(CFG_RTC_SDA); }
+int getRtcSclPin() { return cfg_int(CFG_RTC_SCL); }
+int getRtc32kPin() { return cfg_int(CFG_RTC_32K); }
+
 // Served-time calibration, microseconds, SUBTRACTED from both t2 and t3.
 //
 // t2 is latched when INTn asserts, which is after the W5500 has stored the

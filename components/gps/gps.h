@@ -79,6 +79,17 @@ struct GpsStats {
     bool fitValid;
     uint32_t fitSamples;      // points in the current least-squares window
     double fitTicksPerSec;    // fitted slope; nominal 80 MHz
+
+    /* --- DS3231 TCXO reference (optional; all zero when not fitted) ----- */
+    bool tcxoValid;           // 32k flowing, ratio solved
+    double tcxoErrPpm;        // TCXO vs GPS, locked
+    double tcxoResidualPpm;   // holdover dispersion growth rate
+    uint32_t tcxoSamples;     // tempcomp samples learned
+    float rtcTempC;           // DS3231 die temperature
+
+    /* PPS vs TCXO, oscillator-free */
+    double tcxoPpsDevNs;      // newest pulse vs trend
+    double tcxoPpsRmsNs;      // EW-RMS of that deviation
 };
 
 class GpsDiscipline {
@@ -89,7 +100,8 @@ public:
   // Get last PPS in NTP epoch seconds and fractional 32-bit
   bool getLastPps(uint32_t& sec1900, uint32_t& frac) const;
   uint64_t getLastPpsMonotonicUs() const { return lastPpsMonotonicUs; }
-  double getFrequencyPpm() const { return statFrequencyPpm; }
+  // holdover: live TCXO-referenced frequency
+  double getFrequencyPpm() const;
   uint64_t getLastNmeaUpdateUs() const { return lastNmeaUpdateUs; }
   void getStats(GpsStats& out) const;
   /* Copy the published satellite table. Returns the count written. */
@@ -105,6 +117,16 @@ public:
   // counter and the fit converts either to UTC with no esp_timer hop and no
   // ISR latency in the path.
   esp_err_t beginRxCapture(int intGpio);
+  // DS3231 32k as holdover reference
+  esp_err_t beginTcxoCapture(int gpio);
+  // die temp from I2C owner
+  void setRtcTemp(float tempC);
+
+  // learned tempcomp survives reboots
+  static const int kTcxoBins = 250;  // -40..85C, 0.5C bins
+  void tcxoRestoreFromNvs();
+  bool tcxoPersistToNvs();
+  uint32_t tcxoSampleCount() const { return tcxoGlobalN; }
   // Latest hardware-latched packet arrival; seq lets the caller detect a new
   // one. Returns false if RX capture is not configured.
   bool getRxCapture(uint32_t& capTick, uint32_t& seq) const;
@@ -232,6 +254,56 @@ private:
   mcpwm_cap_channel_handle_t rxCapChannel;   // W5500 INTn, packet arrival
   volatile uint32_t rxCapTick;
   volatile uint32_t rxCapSeq;
+
+  // --- DS3231 TCXO reference (optional) ----------------------------------
+  // ISR side, seqlock published
+  mcpwm_cap_channel_handle_t tcxoCapChannel;
+  volatile uint32_t tcxoSeq;
+  volatile int64_t tcxoTickExt;
+  volatile uint32_t tcxoCount;
+  volatile uint32_t tcxoRawPub;      // newest 32k capture tick
+  uint32_t tcxoLastRaw;              // ISR-only
+  bool tcxoTickInit;                 // ISR-only
+  // 1 Hz snapshot ring
+  static const int kTcxoRing = 17;
+  struct TcxoSnap { int64_t tick; uint32_t count; };
+  TcxoSnap tcxoRing[kTcxoRing];
+  int tcxoRingHead, tcxoRingN;
+  int64_t tcxoLastSnapUs;
+  // cycles per event, runtime calibrated
+  double tcxoCyclesPerEvent;
+  double tcxoApbPerSec;              // APB ticks per TCXO-second
+  bool tcxoRatioValid;
+  volatile float rtcTempC;
+  volatile int64_t rtcTempUs;        // when it was last fed
+  // learned error per temp bin
+  float tcxoBinPpm[kTcxoBins];
+  uint16_t tcxoBinN[kTcxoBins];
+  double tcxoGlobalPpm;
+  uint32_t tcxoGlobalN;
+  double tcxoLiveErrPpm;             // newest measured error while locked
+  double tcxoResidualPpm;            // EWMA |error - correction|
+  volatile double tcxoHoldoverPpm;   // instantaneous crystal-vs-TCXO estimate
+  volatile bool tcxoHoldoverGood;
+  volatile bool tcxoCorrFromBin;     // correction from populated bin
+  // average frequency since anchor
+  int64_t tcxoHoldStartUs;           // 0 = not integrating
+  int64_t tcxoHoldLastUs;
+  double tcxoHoldPpmSecIntegral;     // ppm seconds since anchor
+  volatile double tcxoAvgPpm;        // integral / elapsed
+  // PPS-vs-TCXO metric state
+  bool tcxoPpsPrevValid;
+  uint32_t tcxoPpsPrevCnt;
+  int32_t tcxoPpsPrevSub;
+  uint32_t tcxoPpsPrevSec;
+  bool tcxoPpsFreqInit;
+  double tcxoPpsFreqNsPerS;          // detrend EWMA, ns/s
+  double tcxoPpsDevNs;
+  double tcxoPpsRmsNs;
+  void tcxoPpsSample(uint32_t ppsCapTick, uint32_t gpsSec);
+  void tcxoUpdate();                 // 1 Hz, from loop()
+  bool tcxoCorrPpm(double& out, bool& fromBin) const;
+  static bool IRAM_ATTR tcxo_capture_callback(mcpwm_cap_channel_handle_t ch, const mcpwm_capture_event_data_t* edata, void* ctx);
 
   // Anchor tying the newest disciplined pulse to both timescales, published
   // together so a reader always gets a consistent pair.

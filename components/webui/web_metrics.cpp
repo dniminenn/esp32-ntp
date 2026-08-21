@@ -28,6 +28,8 @@
 
 extern volatile uint32_t g_mainLoopBeats;
 extern uint32_t g_bootCount;
+extern volatile int g_rtcPresent;
+extern volatile float g_rtcOffsetSec;
 
 void WebServer::sendMetrics() {
   GpsStats gs = {};
@@ -318,6 +320,48 @@ void WebServer::sendMetrics() {
     gs.freqDriftPpmPerHour,
     gs.residualPredictedSec);
 
+  /* DS3231/TCXO metrics */
+  if (blen > 0 && blen < (int)(sizeof(g_resp) - hdrReserve) - 1600) {
+    int cap = (int)(sizeof(g_resp) - hdrReserve);
+    blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
+      "# HELP ntp_rtc_present DS3231 fitted and answering (-1 not configured, 0 not answering)\n"
+      "# TYPE ntp_rtc_present gauge\n"
+      "ntp_rtc_present %d\n"
+      "# HELP ntp_rtc_temp_celsius DS3231 die temperature (its own tempcomp input)\n"
+      "# TYPE ntp_rtc_temp_celsius gauge\n"
+      "ntp_rtc_temp_celsius %.2f\n"
+      "# HELP ntp_rtc_offset_seconds Battery-backed RTC minus system time, whole seconds (the RTC is boundary-aligned at write-back, so sub-second drift reads 0)\n"
+      "# TYPE ntp_rtc_offset_seconds gauge\n"
+      "ntp_rtc_offset_seconds %.3f\n"
+      "# HELP ntp_tcxo_valid 32kHz captures flowing and the APB-vs-TCXO ratio solved\n"
+      "# TYPE ntp_tcxo_valid gauge\n"
+      "ntp_tcxo_valid %d\n"
+      "# HELP ntp_tcxo_err_ppm Measured DS3231 TCXO error against GPS (newest, locked only)\n"
+      "# TYPE ntp_tcxo_err_ppm gauge\n"
+      "ntp_tcxo_err_ppm %.4f\n"
+      "# HELP ntp_tcxo_residual_ppm EWMA |error - learned correction|; TCXO-holdover dispersion grows at this rate\n"
+      "# TYPE ntp_tcxo_residual_ppm gauge\n"
+      "ntp_tcxo_residual_ppm %.4f\n"
+      "# HELP ntp_tcxo_samples Locked seconds folded into the learned tempcomp\n"
+      "# TYPE ntp_tcxo_samples counter\n"
+      "ntp_tcxo_samples %" PRIu32 "\n"
+      "# HELP ntp_pps_vs_tcxo_ns Newest PPS deviation from the TCXO tick stream, frequency-detrended. No local oscillator in the loop: this is the pulse itself plus 12.5 ns capture quantisation.\n"
+      "# TYPE ntp_pps_vs_tcxo_ns gauge\n"
+      "ntp_pps_vs_tcxo_ns %.1f\n"
+      "# HELP ntp_pps_vs_tcxo_rms_ns EW-RMS of ntp_pps_vs_tcxo_ns; compare against ntp_rms_offset_seconds, which mixes in crystal thermal ramp\n"
+      "# TYPE ntp_pps_vs_tcxo_rms_ns gauge\n"
+      "ntp_pps_vs_tcxo_rms_ns %.1f\n",
+      g_rtcPresent,
+      gs.rtcTempC,
+      (double)g_rtcOffsetSec,
+      gs.tcxoValid ? 1 : 0,
+      gs.tcxoErrPpm,
+      gs.tcxoResidualPpm,
+      gs.tcxoSamples,
+      gs.tcxoPpsDevNs,
+      gs.tcxoPpsRmsNs);
+  }
+
   /*
    * Reply-path attribution. Labelled series rather than one metric per span so
    * a single query renders the whole budget, and so adding a checkpoint does
@@ -325,28 +369,29 @@ void WebServer::sendMetrics() {
    */
   if (blen > 0) {
     int cap = (int)(sizeof(g_resp) - hdrReserve);
-    blen += snprintf(body + blen, cap - blen,
+    if (blen > cap) blen = cap;   /* restore invariant after overflow */
+    blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
       "# HELP ntp_path_span_us Honest software-timed reply-path spans (EWMA)\n"
       "# TYPE ntp_path_span_us gauge\n");
     for (int i = 0; i < NTP_PROF_COUNT && blen < cap - 128; ++i)
-      blen += snprintf(body + blen, cap - blen,
+      blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
         "ntp_path_span_us{span=\"%s\"} %.3f\n",
         ntp_prof_name(i), ntp_prof_ewma_us(i));
-    blen += snprintf(body + blen, cap - blen,
+    blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
       "# HELP ntp_path_span_max_us Worst observed value of each span\n"
       "# TYPE ntp_path_span_max_us gauge\n");
     for (int i = 0; i < NTP_PROF_COUNT && blen < cap - 128; ++i)
-      blen += snprintf(body + blen, cap - blen,
+      blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
         "ntp_path_span_max_us{span=\"%s\"} %.3f\n",
         ntp_prof_name(i), ntp_prof_max_us(i));
-    blen += snprintf(body + blen, cap - blen,
+    blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
       "# HELP ntp_path_span_min_us Best observed value of each span (the floor)\n"
       "# TYPE ntp_path_span_min_us gauge\n");
     for (int i = 0; i < NTP_PROF_COUNT && blen < cap - 128; ++i)
-      blen += snprintf(body + blen, cap - blen,
+      blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
         "ntp_path_span_min_us{span=\"%s\"} %.3f\n",
         ntp_prof_name(i), ntp_prof_min_us(i));
-    blen += snprintf(body + blen, cap - blen,
+    blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
       "# HELP ntp_int_to_send_us Arrival edge to SEND accepted (the honest turnaround)\n"
       "# TYPE ntp_int_to_send_us gauge\n"
       "ntp_int_to_send_us %.3f\n"
@@ -388,7 +433,7 @@ void WebServer::sendMetrics() {
 
     /* Cumulative histogram of int_to_send, so the bimodality is visible and a
      * percentile can be read off directly rather than inferred from an EWMA. */
-    blen += snprintf(body + blen, cap - blen,
+    blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
       "# HELP ntp_int_to_send_us_bucket Cumulative histogram of arrival-edge to SEND\n"
       "# TYPE ntp_int_to_send_us_bucket histogram\n");
     uint32_t cum = 0;
@@ -396,10 +441,10 @@ void WebServer::sendMetrics() {
       cum += ntp_prof_bucket(i);
       uint32_t e = ntp_prof_bucket_edge_us(i);
       if (e)
-        blen += snprintf(body + blen, cap - blen,
+        blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
           "ntp_int_to_send_us_bucket{le=\"%" PRIu32 "\"} %" PRIu32 "\n", e, cum);
       else
-        blen += snprintf(body + blen, cap - blen,
+        blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
           "ntp_int_to_send_us_bucket{le=\"+Inf\"} %" PRIu32 "\n", cum);
     }
   }
@@ -416,38 +461,38 @@ void WebServer::sendMetrics() {
     int nsat = gps ? gps->getSatellites(sats, 40) : 0;
     int cap = (int)(sizeof(g_resp) - hdrReserve);
     if (nsat > 0 && blen < cap - 1) {
-      blen += snprintf(body + blen, cap - blen,
+      blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
         "# HELP gps_satellite_cno_dbhz C/N0 per satellite\n"
         "# TYPE gps_satellite_cno_dbhz gauge\n");
       for (int i = 0; i < nsat && blen < cap - 96; ++i)
-        blen += snprintf(body + blen, cap - blen,
+        blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
           "gps_satellite_cno_dbhz{gnss=\"%s\",svid=\"%u\"} %u\n",
           kGnss[sats[i].gnss < GNSS_COUNT ? sats[i].gnss : 0],
           (unsigned)sats[i].svid, (unsigned)sats[i].cn0);
 
-      blen += snprintf(body + blen, cap - blen,
+      blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
         "# HELP gps_satellite_elevation_degrees\n"
         "# TYPE gps_satellite_elevation_degrees gauge\n");
       for (int i = 0; i < nsat && blen < cap - 96; ++i)
-        blen += snprintf(body + blen, cap - blen,
+        blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
           "gps_satellite_elevation_degrees{gnss=\"%s\",svid=\"%u\"} %d\n",
           kGnss[sats[i].gnss < GNSS_COUNT ? sats[i].gnss : 0],
           (unsigned)sats[i].svid, (int)sats[i].elev);
 
-      blen += snprintf(body + blen, cap - blen,
+      blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
         "# HELP gps_satellite_azimuth_degrees\n"
         "# TYPE gps_satellite_azimuth_degrees gauge\n");
       for (int i = 0; i < nsat && blen < cap - 96; ++i)
-        blen += snprintf(body + blen, cap - blen,
+        blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
           "gps_satellite_azimuth_degrees{gnss=\"%s\",svid=\"%u\"} %u\n",
           kGnss[sats[i].gnss < GNSS_COUNT ? sats[i].gnss : 0],
           (unsigned)sats[i].svid, (unsigned)sats[i].azim);
 
-      blen += snprintf(body + blen, cap - blen,
+      blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
         "# HELP gps_satellite_used 1 if SV used in nav solution\n"
         "# TYPE gps_satellite_used gauge\n");
       for (int i = 0; i < nsat && blen < cap - 96; ++i)
-        blen += snprintf(body + blen, cap - blen,
+        blen += snprintf(body + blen, blen < cap ? cap - blen : 0,
           "gps_satellite_used{gnss=\"%s\",svid=\"%u\"} %d\n",
           kGnss[sats[i].gnss < GNSS_COUNT ? sats[i].gnss : 0],
           (unsigned)sats[i].svid, sats[i].used ? 1 : 0);

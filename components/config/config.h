@@ -34,6 +34,11 @@ int getGpsUartRxPin();
 int getPpsGpioPin();
 int64_t getPpsCalibrationUs();
 
+// DS3231 RTC (optional; -1 = not fitted)
+int getRtcSdaPin();
+int getRtcSclPin();
+int getRtc32kPin();
+
 // Network: WIZnet or WiFi
 bool getNetworkWiznet();
 bool getNetworkWifi();

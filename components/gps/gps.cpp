@@ -3,6 +3,8 @@
 #include "gps.h"
 #include <stdlib.h>
 #include "config.h"
+#include "civil_time.h"
+#include "nvs.h"
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -53,6 +55,13 @@ static const int64_t kHoldoverMaxUs = 3600LL * 1000000LL; // ...or after 1 hour,
 static const double  kFreqEwmaAlpha = 0.05;               // fit -> filtered frequency
 static const double  kHoldoverDriftFloorPpmPerHour = 0.5; // never claim better than this
 
+/* DS3231 TCXO holdover constants. */
+static const uint32_t kTcxoPrescale = 256;   // real divisor calibrated at runtime
+static const double   kTcxoHoldoverFloorPpm = 0.05;        // never claim better than this
+static const int64_t  kHoldoverMaxTcxoUs = 24LL * 3600LL * 1000000LL;
+static const uint32_t kTcxoMinLearnSamples = 60;           // before trusting a correction
+static const float    kTcxoTempMin = -40.0f;               // full rated range, 0.5C step
+
 static uint32_t unix_to_ntp_seconds(time_t unixSec) {
   return (uint32_t)((uint64_t)unixSec + 2208988800ULL);
 }
@@ -76,7 +85,21 @@ GpsDiscipline::GpsDiscipline()
     filteredFrequencyPpm(0), filteredRmsOffsetSec(0),
     capTimer(nullptr), capChannel(nullptr), rxCapChannel(nullptr),
     rxCapTick(0), rxCapSeq(0),
-    anchorSeq(0), anchorCapTick(0), anchorSec1900(0), anchorFrac(0) {}
+    tcxoCapChannel(nullptr), tcxoSeq(0), tcxoTickExt(0), tcxoCount(0),
+    tcxoRawPub(0), tcxoLastRaw(0), tcxoTickInit(false),
+    tcxoRingHead(0), tcxoRingN(0), tcxoLastSnapUs(0),
+    tcxoCyclesPerEvent(0), tcxoApbPerSec(0), tcxoRatioValid(false),
+    rtcTempC(0), rtcTempUs(0),
+    tcxoGlobalPpm(0), tcxoGlobalN(0), tcxoLiveErrPpm(0), tcxoResidualPpm(0),
+    tcxoHoldoverPpm(0), tcxoHoldoverGood(false), tcxoCorrFromBin(false),
+    tcxoHoldStartUs(0), tcxoHoldLastUs(0), tcxoHoldPpmSecIntegral(0), tcxoAvgPpm(0),
+    tcxoPpsPrevValid(false), tcxoPpsPrevCnt(0), tcxoPpsPrevSub(0),
+    tcxoPpsPrevSec(0), tcxoPpsFreqInit(false), tcxoPpsFreqNsPerS(0),
+    tcxoPpsDevNs(0), tcxoPpsRmsNs(0),
+    anchorSeq(0), anchorCapTick(0), anchorSec1900(0), anchorFrac(0) {
+  memset(tcxoBinPpm, 0, sizeof(tcxoBinPpm));
+  memset(tcxoBinN, 0, sizeof(tcxoBinN));
+}
 
 esp_err_t GpsDiscipline::begin(int uartPort_, int baud_, int txPin_, int rxPin_, int ppsGpio_) {
   uartPort = uartPort_;
@@ -266,6 +289,253 @@ esp_err_t GpsDiscipline::beginRxCapture(int intGpio) {
   return mcpwm_capture_channel_enable(rxCapChannel);
 }
 
+// --- DS3231 TCXO capture -------------------------------------------------
+bool IRAM_ATTR GpsDiscipline::tcxo_capture_callback(
+    mcpwm_cap_channel_handle_t ch, const mcpwm_capture_event_data_t* edata,
+    void* ctx) {
+  GpsDiscipline* self = reinterpret_cast<GpsDiscipline*>(ctx);
+  uint32_t raw = edata->cap_value;
+  if (!self->tcxoTickInit) {
+    self->tcxoTickInit = true;
+    self->tcxoLastRaw = raw;
+    return false;
+  }
+  int32_t d = (int32_t)(raw - self->tcxoLastRaw);   // wrap-safe: ~625k ticks apart
+  self->tcxoLastRaw = raw;
+  self->tcxoSeq = self->tcxoSeq + 1;
+  __sync_synchronize();
+  self->tcxoTickExt += d;
+  self->tcxoCount = self->tcxoCount + 1;
+  self->tcxoRawPub = raw;
+  __sync_synchronize();
+  self->tcxoSeq = self->tcxoSeq + 1;
+  return false;
+}
+
+esp_err_t GpsDiscipline::beginTcxoCapture(int gpio) {
+  if (gpio < 0 || capTimer == nullptr) return ESP_ERR_INVALID_ARG;
+  mcpwm_capture_channel_config_t cfg = {};
+  cfg.gpio_num = gpio;
+  cfg.prescale = kTcxoPrescale;
+  // falling edge; rising ramps slowly
+  cfg.flags.pos_edge = 0;
+  cfg.flags.neg_edge = 1;
+  // last channel, shared 80MHz counter
+  esp_err_t err = mcpwm_new_capture_channel(capTimer, &cfg, &tcxoCapChannel);
+  if (err != ESP_OK) return err;
+  mcpwm_capture_event_callbacks_t cbs = {};
+  cbs.on_cap = &GpsDiscipline::tcxo_capture_callback;
+  err = mcpwm_capture_channel_register_event_callbacks(tcxoCapChannel, &cbs, this);
+  if (err != ESP_OK) return err;
+  err = mcpwm_capture_channel_enable(tcxoCapChannel);
+  if (err != ESP_OK) return err;
+  // open-drain 32K needs pull-up
+  gpio_set_pull_mode((gpio_num_t)gpio, GPIO_PULLUP_ONLY);
+  return ESP_OK;
+}
+
+void GpsDiscipline::setRtcTemp(float tempC) {
+  rtcTempC = tempC;
+  rtcTempUs = esp_timer_get_time();
+}
+
+// correction for current die temperature
+bool GpsDiscipline::tcxoCorrPpm(double& out, bool& fromBin) const {
+  fromBin = false;
+  bool tempFresh = rtcTempUs != 0 &&
+                   esp_timer_get_time() - rtcTempUs < 300000000LL;   // 5 min
+  if (tempFresh) {
+    int bin = (int)((rtcTempC - kTcxoTempMin) * 2.0f);
+    for (int r = 0; r <= 4; ++r) {           // search outward to ±2C
+      for (int s = -1; s <= 1; s += 2) {
+        int b = bin + (s < 0 ? -r : r);
+        if (b < 0 || b >= kTcxoBins) continue;
+        if (tcxoBinN[b] >= 32) { out = tcxoBinPpm[b]; fromBin = true; return true; }
+        if (r == 0) break;                   // don't visit bin twice
+      }
+    }
+  }
+  if (tcxoGlobalN >= kTcxoMinLearnSamples) { out = tcxoGlobalPpm; return true; }
+  return false;
+}
+
+// PPS timestamped against TCXO ticks
+void GpsDiscipline::tcxoPpsSample(uint32_t ppsCapTick, uint32_t gpsSec) {
+  if (tcxoCapChannel == nullptr || !tcxoRatioValid) {
+    tcxoPpsPrevValid = false;
+    return;
+  }
+  uint32_t cnt = 0, raw = 0, s;
+  int tries = 0;
+  for (;;) {
+    if (++tries > 8) return;
+    s = tcxoSeq;
+    if (s & 1) continue;
+    __sync_synchronize();
+    cnt = tcxoCount;
+    raw = tcxoRawPub;
+    __sync_synchronize();
+    if (tcxoSeq == s) break;
+  }
+  // ticks from newest 32k capture
+  // bound: one capture period max
+  int32_t sub = (int32_t)(ppsCapTick - raw);
+  if (sub > 2000000 || sub < -2000000) { tcxoPpsPrevValid = false; return; }
+
+  if (tcxoPpsPrevValid) {
+    uint32_t dSec = gpsSec - tcxoPpsPrevSec;
+    if (dSec >= 1 && dSec <= 5) {
+      double cycles = (double)(uint32_t)(cnt - tcxoPpsPrevCnt) * tcxoCyclesPerEvent
+                    + (double)(sub - tcxoPpsPrevSub) * (32768.0 / tcxoApbPerSec);
+      double devNs = (cycles / 32768.0 - (double)dSec) * 1e9;
+      double devPerSec = devNs / (double)dSec;
+      if (!tcxoPpsFreqInit) {
+        tcxoPpsFreqInit = true;
+        tcxoPpsFreqNsPerS = devPerSec;
+      } else {
+        double resid = devNs - tcxoPpsFreqNsPerS * (double)dSec;
+        tcxoPpsDevNs = resid;
+        tcxoPpsRmsNs = sqrt(0.05 * resid * resid + 0.95 * tcxoPpsRmsNs * tcxoPpsRmsNs);
+        tcxoPpsFreqNsPerS += (1.0 / 240.0) * (devPerSec - tcxoPpsFreqNsPerS);
+      }
+    } else {
+      tcxoPpsFreqInit = false;   // gap: trend stale
+    }
+  }
+  tcxoPpsPrevValid = true;
+  tcxoPpsPrevCnt = cnt;
+  tcxoPpsPrevSub = sub;
+  tcxoPpsPrevSec = gpsSec;
+}
+
+// 1 Hz: ratio, learning, holdover
+void GpsDiscipline::tcxoUpdate() {
+  if (tcxoCapChannel == nullptr) return;
+  int64_t nowUs = esp_timer_get_time();
+  if (nowUs - tcxoLastSnapUs < 1000000) return;
+  tcxoLastSnapUs = nowUs;
+
+  int64_t tick = 0;
+  uint32_t cnt = 0, s;
+  int tries = 0;
+  for (;;) {
+    if (++tries > 8) return;
+    s = tcxoSeq;
+    if (s & 1) continue;
+    __sync_synchronize();
+    tick = tcxoTickExt;
+    cnt = tcxoCount;
+    __sync_synchronize();
+    if (tcxoSeq == s) break;
+  }
+
+  int oldest = (tcxoRingHead + kTcxoRing - tcxoRingN) % kTcxoRing;
+  bool haveBase = tcxoRingN >= 2;
+  int64_t baseTick = haveBase ? tcxoRing[oldest].tick : 0;
+  uint32_t baseCnt = haveBase ? tcxoRing[oldest].count : 0;
+  tcxoRing[tcxoRingHead] = { tick, cnt };
+  tcxoRingHead = (tcxoRingHead + 1) % kTcxoRing;
+  if (tcxoRingN < kTcxoRing) tcxoRingN++;
+
+  if (haveBase) {
+    uint32_t dCnt = cnt - baseCnt;
+    if (dCnt == 0) {
+      // 32k stopped; restart accumulation
+      static bool stallWarned = false;
+      if (!stallWarned) {
+        stallWarned = true;
+        ESP_LOGW(TAG, "32kHz input silent — no TCXO edges (check 32K wiring/pull-up)");
+      }
+      tcxoRingN = 0;
+      tcxoRatioValid = false;
+      tcxoHoldoverGood = false;
+      return;
+    }
+    // integer cycles per event
+    if (tcxoCyclesPerEvent == 0) {
+      if (dCnt < 128) return;
+      double kf = (double)(tick - baseTick) / (double)dCnt * 32768.0 / 80000000.0;
+      double kr = floor(kf + 0.5);
+      if (kr < 1 || kr > 2048 || fabs(kf - kr) > 0.25) {
+        ESP_LOGW(TAG, "32kHz event spacing not an integer cycle count (%.3f) — wrong signal?", kf);
+        tcxoRingN = 0;
+        return;
+      }
+      tcxoCyclesPerEvent = kr;
+      ESP_LOGI(TAG, "TCXO capture calibrated: %.0f cycles/event (%.1f events/s)",
+               kr, 32768.0 / kr);
+    }
+    double tcxoSec = (double)dCnt * tcxoCyclesPerEvent / 32768.0;
+    double r = (double)(tick - baseTick) / tcxoSec;
+    if (r > 79960000.0 && r < 80040000.0) {   // ±500 ppm sanity
+      if (!tcxoRatioValid)
+        ESP_LOGI(TAG, "TCXO reference live: crystal at %+.3f ppm vs 32kHz",
+                 (r / 80000000.0 - 1.0) * 1e6);
+      tcxoApbPerSec = r;
+      tcxoRatioValid = true;
+    } else {
+      tcxoRatioValid = false;
+    }
+  }
+
+  // learn when disciplined; clamp ±50ppm
+  if (tcxoRatioValid && gpsLock && !holdover && fitValid && fitCount >= 120) {
+    double e = (fitTicksPerSec / tcxoApbPerSec - 1.0) * 1e6;  // ppm; fast TCXO > 0
+    if (e > -50.0 && e < 50.0) {
+      tcxoLiveErrPpm = e;
+      // residual against pre-fold correction
+      double corr;
+      bool fromBin;
+      if (tcxoCorrPpm(corr, fromBin))
+        tcxoResidualPpm += 0.01 * (fabs(e - corr) - tcxoResidualPpm);
+      else
+        tcxoResidualPpm = 0.5;   // first samples: pessimistic until measured
+      if (tcxoGlobalN == 0) tcxoGlobalPpm = e;
+      else tcxoGlobalPpm += 0.01 * (e - tcxoGlobalPpm);
+      tcxoGlobalN++;
+      bool tempFresh = rtcTempUs != 0 && nowUs - rtcTempUs < 300000000LL;
+      if (tempFresh) {
+        int bin = (int)((rtcTempC - kTcxoTempMin) * 2.0f);
+        if (bin >= 0 && bin < kTcxoBins) {
+          if (tcxoBinN[bin] == 0) tcxoBinPpm[bin] = (float)e;
+          else tcxoBinPpm[bin] += 0.05f * ((float)e - tcxoBinPpm[bin]);
+          if (tcxoBinN[bin] < 65535) tcxoBinN[bin]++;
+        }
+      }
+    }
+  }
+
+  // holdover frequency, never stale
+  double corr;
+  bool fromBin;
+  if (tcxoRatioValid && tcxoCorrPpm(corr, fromBin)) {
+    double fEst = tcxoApbPerSec * (1.0 + corr * 1e-6);
+    tcxoHoldoverPpm = (fEst / 80000000.0 - 1.0) * 1e6;
+    tcxoCorrFromBin = fromBin;
+    tcxoHoldoverGood = true;
+  } else {
+    tcxoHoldoverGood = false;
+  }
+
+  /* serve average frequency since anchor */
+  if (!holdover) {
+    tcxoHoldStartUs = 0;
+  } else if (tcxoHoldoverGood) {
+    if (tcxoHoldStartUs == 0) {
+      // integral starts at anchor
+      tcxoHoldStartUs = (int64_t)lastPpsMonotonicUs;
+      tcxoHoldLastUs = tcxoHoldStartUs;
+      tcxoHoldPpmSecIntegral = 0;
+    }
+    tcxoHoldPpmSecIntegral +=
+        tcxoHoldoverPpm * (double)(nowUs - tcxoHoldLastUs) / 1e6;
+    tcxoHoldLastUs = nowUs;
+    double elapsed = (double)(nowUs - tcxoHoldStartUs) / 1e6;
+    tcxoAvgPpm = elapsed > 0.5 ? tcxoHoldPpmSecIntegral / elapsed
+                               : (double)tcxoHoldoverPpm;
+  }
+}
+
 bool IRAM_ATTR GpsDiscipline::getRxCapture(uint32_t& capTick, uint32_t& seq) const {
   if (rxCapChannel == nullptr) return false;
   uint32_t s1, s2;
@@ -333,17 +603,6 @@ static bool parse_two(const char* s, int& v) {
   return true;
 }
 
-// Convert date/time to unix epoch (UTC)
-static time_t make_unix_time_utc(int year, int month, int day, int hour, int min, int sec) {
-  // year full (e.g., 2024)
-  int a = (14 - month) / 12;
-  int y = year + 4800 - a;
-  int m = month + 12 * a - 3;
-  int JDN = day + (153*m + 2)/5 + 365*y + y/4 - y/100 + y/400 - 32045;
-  // days since Unix epoch (1970-01-01 JDN 2440588)
-  int days = JDN - 2440588;
-  return (time_t)days * 86400 + hour*3600 + min*60 + sec;
-}
 
 int GpsDiscipline::from_hex(char c) {
   if (c >= '0' && c <= '9') return c - '0';
@@ -401,7 +660,7 @@ bool GpsDiscipline::parse_rmc_line(const char* line, int len, time_t& outUnixSec
   if (!parse_two(dates, dd) || !parse_two(dates+2, MM) || !parse_two(dates+4, yy)) return false;
   int fullYear = (yy >= 70 ? 1900 + yy : 2000 + yy);
 
-  outUnixSec = make_unix_time_utc(fullYear, MM, dd, hh, mm, ss);
+  outUnixSec = civil_to_unix(fullYear, MM, dd, hh, mm, ss);
   return true;
 }
 
@@ -750,6 +1009,7 @@ void GpsDiscipline::handle_pps_deferred() {
       }
       fitPush((uint32_t)ppsSec, tickExt);
       fitValid = fitSolve();
+      tcxoPpsSample(capValue, (uint32_t)ppsSec);
       if (fitValid) {
         offset = fitResidualTicks / fitTicksPerSec;  // seconds, signed
         statFrequencyPpm = (fitTicksPerSec / 80000000.0 - 1.0) * 1e6;
@@ -959,6 +1219,74 @@ void GpsDiscipline::getStats(GpsStats& out) const {
   out.fitValid      = fitValid;
   out.fitSamples    = (uint32_t)fitCount;
   out.fitTicksPerSec = fitValid ? fitTicksPerSec : 0.0;
+  out.tcxoValid     = tcxoRatioValid;
+  out.tcxoErrPpm    = tcxoLiveErrPpm;
+  out.tcxoResidualPpm = tcxoResidualPpm;
+  out.tcxoSamples   = tcxoGlobalN;
+  out.rtcTempC      = rtcTempC;
+  out.tcxoPpsDevNs  = tcxoPpsDevNs;
+  out.tcxoPpsRmsNs  = tcxoPpsRmsNs;
+}
+
+double GpsDiscipline::getFrequencyPpm() const {
+  if (holdover && tcxoHoldStartUs != 0) return tcxoAvgPpm;
+  return statFrequencyPpm;
+}
+
+// versioned NVS blob layout
+struct TcxoNvsState {
+  uint32_t magic;
+  float binPpm[GpsDiscipline::kTcxoBins];
+  uint16_t binN[GpsDiscipline::kTcxoBins];
+  float globalPpm;
+  uint32_t globalN;
+};
+static const uint32_t kTcxoStateMagic = 0x54435832;  // layout version
+static const char* kTcxoNvsNs = "tcxo";
+static const char* kTcxoNvsKey = "state";
+
+void GpsDiscipline::tcxoRestoreFromNvs() {
+  nvs_handle_t h;
+  if (nvs_open(kTcxoNvsNs, NVS_READONLY, &h) != ESP_OK) return;
+  TcxoNvsState* st = (TcxoNvsState*)malloc(sizeof(TcxoNvsState));
+  if (!st) { nvs_close(h); return; }
+  size_t len = sizeof(*st);
+  bool ok = nvs_get_blob(h, kTcxoNvsKey, st, &len) == ESP_OK &&
+            len == sizeof(*st) && st->magic == kTcxoStateMagic;
+  nvs_close(h);
+  // reject implausible blob
+  if (ok && !(st->globalPpm > -50.0f && st->globalPpm < 50.0f)) ok = false;
+  for (int i = 0; ok && i < kTcxoBins; ++i)
+    if (st->binN[i] && !(st->binPpm[i] > -50.0f && st->binPpm[i] < 50.0f)) ok = false;
+  if (ok) {
+    memcpy(tcxoBinPpm, st->binPpm, sizeof(tcxoBinPpm));
+    memcpy(tcxoBinN, st->binN, sizeof(tcxoBinN));
+    tcxoGlobalPpm = st->globalPpm;
+    tcxoGlobalN = st->globalN;
+    // pessimistic seed after restore
+    tcxoResidualPpm = 0.5;
+    ESP_LOGI(TAG, "TCXO tempcomp restored (%u samples)", (unsigned)st->globalN);
+  }
+  free(st);
+}
+
+bool GpsDiscipline::tcxoPersistToNvs() {
+  TcxoNvsState* st = (TcxoNvsState*)malloc(sizeof(TcxoNvsState));
+  if (!st) return false;
+  st->magic = kTcxoStateMagic;
+  memcpy(st->binPpm, (const void*)tcxoBinPpm, sizeof(st->binPpm));
+  memcpy(st->binN, (const void*)tcxoBinN, sizeof(st->binN));
+  st->globalPpm = (float)tcxoGlobalPpm;
+  st->globalN = tcxoGlobalN;
+  nvs_handle_t h;
+  bool ok = false;
+  if (nvs_open(kTcxoNvsNs, NVS_READWRITE, &h) == ESP_OK) {
+    ok = nvs_set_blob(h, kTcxoNvsKey, st, sizeof(*st)) == ESP_OK &&
+         nvs_commit(h) == ESP_OK;
+    nvs_close(h);
+  }
+  free(st);
+  return ok;
 }
 
 double GpsDiscipline::getRootDispersion() const {
@@ -980,6 +1308,15 @@ double GpsDiscipline::getRootDispersion() const {
    * six minutes of a holdover budgeted for an hour, while its real error at
    * that point was about 2us.
    */
+  /* TCXO holdover: linear growth */
+  if (tcxoHoldoverGood) {
+    // unlearned temperature: claim 10x worse
+    double floorPpm = tcxoCorrFromBin ? kTcxoHoldoverFloorPpm
+                                      : 10.0 * kTcxoHoldoverFloorPpm;
+    double rPpm = fmax(tcxoResidualPpm, floorPpm);
+    return fabs(filteredRmsOffsetSec) + rPpm * 1e-6 * sinceGoodSec + 16e-6;
+  }
+
   // A linear fit over kFitWin lags a ramp by half its window; the EWMA on top
   // adds ~1/alpha samples. Derived here so retuning either stays consistent.
   const double lagSec = kFitWin / 2.0 + 1.0 / kFreqEwmaAlpha;
@@ -996,7 +1333,9 @@ bool GpsDiscipline::isLocked() const {
   int64_t sinceGoodUs = esp_timer_get_time() - lastGoodPpsUs;
   if (sinceGoodUs < kFreshPpsUs) return true;
   // Holdover: keep claiming sync while the predicted error stays bounded.
-  if (sinceGoodUs > kHoldoverMaxUs) return false;
+  // TCXO earns longer budget
+  if (sinceGoodUs > (tcxoHoldoverGood ? kHoldoverMaxTcxoUs : kHoldoverMaxUs))
+    return false;
   return getRootDispersion() < kHoldoverMaxDispersionSec;
 }
 
@@ -1006,6 +1345,7 @@ double GpsDiscipline::getRootDelay() const {
 
 void GpsDiscipline::loop() {
   handle_pps_deferred();
+  tcxoUpdate();
 
   if (!gpsLock) return;
   int64_t sinceGoodUs = esp_timer_get_time() - lastGoodPpsUs;
@@ -1015,8 +1355,10 @@ void GpsDiscipline::loop() {
     // The fit's anchor is frozen from here on, so hardware RX timestamping must
     // stand down; served time falls back to the esp_timer extrapolation path.
     fitValid = false;
-    ESP_LOGW(TAG, "GPS holdover: no discipline for %.1fs — coasting on oscillator (%.3f ppm)",
-             (double)sinceGoodUs / 1e6, filteredFrequencyPpm);
+    ESP_LOGW(TAG, "GPS holdover: no discipline for %.1fs — %s (%.3f ppm)",
+             (double)sinceGoodUs / 1e6,
+             tcxoHoldoverGood ? "tracking DS3231 TCXO" : "coasting on oscillator",
+             tcxoHoldoverGood ? (double)tcxoHoldoverPpm : filteredFrequencyPpm);
   }
   if (holdover && !lockExpiredLogged && !isLocked()) {
     lockExpiredLogged = true;

@@ -47,6 +47,9 @@ typedef enum {
   CFG_PPS_GPIO,
   CFG_PPS_CAL,
   CFG_SERVE_CAL,
+  CFG_RTC_SDA,
+  CFG_RTC_SCL,
+  CFG_RTC_32K,
   CFG_COUNT
 } cfg_id_t;
 

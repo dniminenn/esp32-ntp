@@ -20,6 +20,7 @@
 #include "config.h"
 #include "config_store.h"
 #include "display.h"
+#include "ds3231.h"
 #include "gps.h"
 #include "esp_task_wdt.h"
 #include "ntp_server.h"
@@ -35,6 +36,7 @@ static NtpServer* g_ntpServer = nullptr;
 static WebServer* g_web = nullptr;
 static W5500Eth* g_ethernet = nullptr;
 static WifiSta* g_wifi = nullptr;
+static Ds3231* g_rtc = nullptr;
 static SemaphoreHandle_t g_displayMutex = nullptr;
 
 // Diagnostics exposed over /metrics (read-only; never on the timekeeping path).
@@ -44,6 +46,9 @@ static SemaphoreHandle_t g_displayMutex = nullptr;
 // remotely without attaching a serial monitor.
 volatile uint32_t g_mainLoopBeats = 0;
 uint32_t g_bootCount = 0;
+// -1/0/1: unconfigured/dead/ok
+volatile int g_rtcPresent = -1;
+volatile float g_rtcOffsetSec = 0;   // RTC minus system, seconds
 
 extern "C" void app_main();
 
@@ -156,6 +161,7 @@ static void ntp_task(void* arg) {
       if (g_wifi) g_wifi->loop();
 #endif
       if (g_web) g_web->loop();
+
       unsigned long now = esp_timer_get_time() / 1000000ULL;
       if (now - lastLog >= 60) {
         struct timeval tv2; struct tm ti2;
@@ -166,6 +172,69 @@ static void ntp_task(void* arg) {
       }
     }
     esp_task_wdt_reset();
+  }
+}
+
+/* RTC housekeeping, off serving task. */
+static void rtc_task(void* arg) {
+  unsigned long lastTempMs = 0, lastCheckMs = 0, lastWriteMs = 0, lastSaveMs = 0;
+  uint32_t lastSavedN = g_gps ? g_gps->tcxoSampleCount() : 0;  /* count restored at boot */
+  bool wroteOnce = false;
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    unsigned long nowMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
+
+    /* temp feeds tempcomp learning */
+    if (nowMs - lastTempMs >= 10000) {
+      lastTempMs = nowMs;
+      float t;
+      if (g_rtc->readTempC(t)) {
+        g_rtcPresent = 1;
+        if (g_gps) g_gps->setRtcTemp(t);
+      } else {
+        g_rtcPresent = 0;
+      }
+    }
+
+    /* persist hourly, flash-friendly */
+    if (g_gps && nowMs - lastSaveMs >= 3600000UL) {
+      lastSaveMs = nowMs;
+      uint32_t n = g_gps->tcxoSampleCount();
+      if (n - lastSavedN >= 300 && g_gps->tcxoPersistToNvs())
+        lastSavedN = n;
+    }
+
+    /* refresh battery-backed seed */
+    if (g_gps && nowMs - lastCheckMs >= 60000) {
+      lastCheckMs = nowMs;
+      GpsStats gs;
+      g_gps->getStats(gs);
+      if (g_gps->isLocked() && !gs.holdover) {
+        struct timeval now;
+        gettimeofday(&now, nullptr);
+        /* aligned RTC: skip near boundary */
+        if (now.tv_usec < 100000 || now.tv_usec > 900000) continue;
+        time_t rt;
+        bool haveRt = g_rtc->readTime(rt);
+        if (haveRt)
+          g_rtcOffsetSec = (float)(rt - now.tv_sec);
+        bool stale = !haveRt || g_rtcOffsetSec > 0.5f || g_rtcOffsetSec < -0.5f;
+        bool refresh = wroteOnce && (nowMs - lastWriteMs >= 86400000UL);
+        if (!wroteOnce || stale || refresh) {
+          /* align write to second boundary */
+          gettimeofday(&now, nullptr);
+          vTaskDelay(pdMS_TO_TICKS((1000000 - now.tv_usec) / 1000 + 1));
+          gettimeofday(&now, nullptr);
+          time_t w = now.tv_sec + (now.tv_usec >= 500000 ? 1 : 0);
+          if (g_rtc->setTime(w) == ESP_OK) {
+            wroteOnce = true;
+            lastWriteMs = nowMs;
+            g_rtcOffsetSec = 0;
+            ESP_LOGI(TAG, "DS3231 set from GPS time");
+          }
+        }
+      }
+    }
   }
 }
 
@@ -218,6 +287,31 @@ void app_main() {
       ESP_LOGI(TAG, "Using stored settings from NVS");
     } else {
       ESP_LOGI(TAG, "No stored settings, using build-time defaults");
+    }
+  }
+
+  // seed clock before network
+  if (Config::getRtcSdaPin() >= 0 && Config::getRtcSclPin() >= 0) {
+    g_rtc = new Ds3231();
+    if (g_rtc->begin(Config::getRtcSdaPin(), Config::getRtcSclPin()) == ESP_OK) {
+      g_rtcPresent = 1;
+      g_rtc->enable32kOutput();
+      float bootTempC;
+      if (g_rtc->readTempC(bootTempC))
+        ESP_LOGI(TAG, "DS3231 die temp %.2fC", bootTempC);
+      time_t t;
+      if (g_rtc->readTime(t) && t > 1735689600LL) {  // sanity: after 2025-01-01
+        // midpoint of truncated second
+        struct timeval seed = { .tv_sec = t, .tv_usec = 500000 };
+        settimeofday(&seed, nullptr);
+        ESP_LOGI(TAG, "System time seeded from DS3231");
+      } else {
+        ESP_LOGW(TAG, "DS3231 present but its time is not trustworthy (OSF set or never set)");
+      }
+    } else {
+      g_rtcPresent = 0;
+      delete g_rtc;
+      g_rtc = nullptr;
     }
   }
 
@@ -339,6 +433,19 @@ void app_main() {
                     "GPIO ISR stamp", esp_err_to_name(rxerr));
   }
 
+  // 32k TCXO holdover reference
+  if (g_rtc && Config::getRtc32kPin() >= 0) {
+    // restore learned tempcomp
+    g_gps->tcxoRestoreFromNvs();
+    esp_err_t terr = g_gps->beginTcxoCapture(Config::getRtc32kPin());
+    if (terr == ESP_OK)
+      ESP_LOGI(TAG, "DS3231 32kHz capture armed on GPIO%d (shared PPS timebase)",
+               Config::getRtc32kPin());
+    else
+      ESP_LOGW(TAG, "DS3231 32kHz capture unavailable (%s); holdover coasts on "
+                    "the frozen estimate", esp_err_to_name(terr));
+  }
+
   g_ntpServer = new NtpServer();
   g_ntpServer->begin(Config::getNtpServerPort(), g_gps);
   if (g_ethernet) {
@@ -387,6 +494,8 @@ void app_main() {
                           PRIO_DISCIPLINE, nullptr, CORE_CLOCK);
   xTaskCreatePinnedToCore(ntp_task, "ntp_srv", 4096, nullptr,
                           PRIO_NTP, nullptr, CORE_NET);
+  if (g_rtc)
+    xTaskCreatePinnedToCore(rtc_task, "rtc_hk", 3072, nullptr, 3, nullptr, CORE_NET);
   ESP_LOGI(TAG, "tasks started: discipline(prio %d core %d) ntp(prio %d core %d)",
            PRIO_DISCIPLINE, CORE_CLOCK, PRIO_NTP, CORE_NET);
   /* app_main returns; the tasks own the system from here. */

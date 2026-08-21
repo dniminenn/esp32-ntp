@@ -199,6 +199,17 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .reboot=true, .advanced=true },
   [CFG_PPS_CAL]    = { .key="pps.cal", .label="PPS calibration (us)", .group="GPS wiring", .type=CF_INT,
                        .imin=-1000000, .imax=1000000, .idef=0, .advanced=true },
+
+  [CFG_RTC_SDA]    = { .key="rtc.sda", .label="SDA pin", .group="DS3231 wiring", .type=CF_INT,
+                       .imin=-1, .imax=33, .idef=-1,
+                       .help="-1 = no DS3231 fitted. With one: battery-backed time at boot.",
+                       .reboot=true, .advanced=true },
+  [CFG_RTC_SCL]    = { .key="rtc.scl", .label="SCL pin", .group="DS3231 wiring", .type=CF_INT,
+                       .imin=-1, .imax=33, .idef=-1, .help=PIN_HELP, .reboot=true, .advanced=true },
+  [CFG_RTC_32K]    = { .key="rtc.32k", .label="32kHz pin", .group="DS3231 wiring", .type=CF_INT,
+                       .imin=-1, .imax=39, .idef=-1,
+                       .help="TCXO output, captured as the holdover frequency reference. -1 = not wired.",
+                       .reboot=true, .advanced=true },
 };
 
 typedef struct {

@@ -110,6 +110,19 @@ almost always one of those rather than the ESP32.
 - **Ethernet (recommended):** WIZnet W5500 on its own SPI bus (HSPI / SPI2 by default, 20 MHz). Its
   `INTn` pin is wired to a GPIO (default GPIO34) for hardware RX timestamping.
 - **Display (optional):** up to 4x MAX7219 8x8 matrices on a separate SPI bus (VSPI / SPI3).
+- **DS3231 RTC (optional):** any DS3231 breakout on I2C (any two GPIOs), 3.3 V, with its coin
+  cell fitted. It does two independent jobs. The battery-backed time seeds the system clock at
+  boot (display and logs are right immediately; NTP still waits for GPS) and is written back
+  from GPS at most daily, or when it has drifted. Wiring the board's **32K pad** to a third GPIO
+  is the interesting part: that pin carries the DS3231's ±2 ppm temperature-compensated
+  oscillator directly, and it lands on the last MCPWM capture channel, sharing the 80 MHz
+  counter with PPS and `INTn`. The crystal is then measured against the TCXO continuously, so
+  GPS holdover stops coasting on a frozen frequency estimate: the crystal's thermal drift is
+  observed live, and the TCXO's own residual error is learned against GPS per 0.5 °C of its die
+  temperature while locked (persisted in NVS, at most one ~1.5 KB write per hour). Holdover
+  dispersion then grows at the learned residual (floored at 0.05 ppm) instead of quadratically,
+  and the holdover budget stretches from 1 h to 24 h. Skip the part entirely and nothing
+  changes: all three pins default to `-1`.
 
 Default pins live in `components/config/config.cpp` and can be overridden in `menuconfig`.
 
@@ -125,6 +138,7 @@ Street prices for the clone-grade parts most people actually buy (AliExpress / H
 | Jumper wires / small perfboard | wiring | $2 |
 | 5V USB supply | power (you probably already own one) | $0 to $3 |
 | MAX7219 4-in-1 8x8 matrix (optional) | LED display | $6 |
+| DS3231 breakout + coin cell (optional) | battery-backed boot time, TCXO holdover reference | $2 |
 
 The MCU row means the original ESP32 specifically. See **Hardware** above for which parts in the
 family can and cannot run this, and why.
@@ -303,6 +317,14 @@ Every runtime setting, generated from the single table in
 | `pps.gpio` | int | `-1`..`39` | R A | PPS pin. Hardware-captured by MCPWM. The whole clock rides on this. |
 | `pps.cal` | int | `-1000000`..`1000000` | A | PPS calibration (us) |
 
+#### DS3231 wiring
+
+| Key | Type | Range | Flags | Setting |
+|---|---|---|---|---|
+| `rtc.sda` | int | `-1`..`33` | R A | SDA pin. -1 = no DS3231 fitted. With one: battery-backed time at boot. |
+| `rtc.scl` | int | `-1`..`33` | R A | SCL pin |
+| `rtc.32k` | int | `-1`..`39` | R A | 32kHz pin. TCXO output, captured as the holdover frequency reference. -1 = not wired. |
+
 `net.mode` is a choice between the W5500 Ethernet path and Wi-Fi STA. `pps.cal` and
 `serve.cal` are microsecond trims: `pps.cal` shifts the PPS reference, `serve.cal` is
 subtracted from both `t2` and `t3` on the way out. Both default to a value measured on the
@@ -379,6 +401,11 @@ retry backs off 1 s, 2 s, then 4 s rather than waiting 4 s to notice.
 | `ntp_free_heap_bytes` / `ntp_min_free_heap_bytes` | Current / lowest-ever free heap |
 | `ntp_eth_link_up` | W5500 link health |
 | `ntp_w5500_version` | W5500 `VERSIONR` (4 = healthy) |
+| `ntp_rtc_present` | DS3231 fitted and answering (-1 = not configured) |
+| `ntp_rtc_temp_celsius` | DS3231 die temperature |
+| `ntp_tcxo_err_ppm` | Measured TCXO error against GPS |
+| `ntp_tcxo_residual_ppm` | Error of the learned TCXO correction; holdover dispersion grows at this rate |
+| `ntp_pps_vs_tcxo_ns` / `_rms_ns` | Each PPS against the TCXO tick stream: pulse quality with no local oscillator in the loop |
 
 **Self-recovery:** the task watchdog is set to reboot, not just warn, so a firmware hang restarts
 the device within seconds. Separately, a W5500 health check restarts the device if the Ethernet chip
