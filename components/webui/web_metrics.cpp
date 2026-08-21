@@ -350,7 +350,13 @@ void WebServer::sendMetrics() {
       "ntp_pps_vs_tcxo_ns %.1f\n"
       "# HELP ntp_pps_vs_tcxo_rms_ns EW-RMS of ntp_pps_vs_tcxo_ns; compare against ntp_rms_offset_seconds, which mixes in crystal thermal ramp\n"
       "# TYPE ntp_pps_vs_tcxo_rms_ns gauge\n"
-      "ntp_pps_vs_tcxo_rms_ns %.1f\n",
+      "ntp_pps_vs_tcxo_rms_ns %.1f\n"
+      "# HELP ntp_pps_flywheel_ns Served-anchor correction: TCXO-smoothed pulse position minus the raw pulse\n"
+      "# TYPE ntp_pps_flywheel_ns gauge\n"
+      "ntp_pps_flywheel_ns %.1f\n"
+      "# HELP ntp_pps_flywheel_active 1 when served time rides the smoothed pulse (~30 s averaging) instead of each raw pulse\n"
+      "# TYPE ntp_pps_flywheel_active gauge\n"
+      "ntp_pps_flywheel_active %d\n",
       g_rtcPresent,
       gs.rtcTempC,
       (double)g_rtcOffsetSec,
@@ -359,7 +365,9 @@ void WebServer::sendMetrics() {
       gs.tcxoResidualPpm,
       gs.tcxoSamples,
       gs.tcxoPpsDevNs,
-      gs.tcxoPpsRmsNs);
+      gs.tcxoPpsRmsNs,
+      gs.tcxoFlywheelNs,
+      gs.tcxoFlywheelActive ? 1 : 0);
   }
 
   /*

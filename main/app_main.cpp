@@ -136,13 +136,9 @@ static void ntp_task(void* arg) {
   unsigned long lastLog = 0;
   unsigned long lastHouse = 0;
   for (;;) {
-    /*
-     * Wake on the W5500's INTn interrupt. The timeout is a safety net only:
-     * a second datagram queued behind one INTn assertion produces no new edge,
-     * so a periodic sweep still drains it.
-     */
-    ntp_wait_for_packet(5 /* ms */);
-    if (g_ntpServer) g_ntpServer->loop();
+    /* wake on INTn; drain socket */
+    ntp_wait_for_packet(50 /* ms */);
+    while (g_ntpServer && g_ntpServer->loop()) {}
 
     /*
      * Housekeeping shares this task deliberately. Every W5500 access funnels
@@ -151,10 +147,9 @@ static void ntp_task(void* arg) {
      * corrupts transfers in flight. Serving from here keeps a single owner
      * without a mutex the hot path would have to acquire per packet.
      */
-    /* Time-gated, not sweep-counted: under a burst, packet rate must not drag
-     * housekeeping SPI into the reply path. */
+    /* time-gated; idle SPI stays quiet */
     unsigned long nowMs = (unsigned long)(esp_timer_get_time() / 1000ULL);
-    if (nowMs - lastHouse >= 20) {
+    if (nowMs - lastHouse >= 100) {
       lastHouse = nowMs;
       if (g_ethernet) g_ethernet->loop();
 #if CONFIG_SOC_WIFI_SUPPORTED

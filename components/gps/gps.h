@@ -90,6 +90,8 @@ struct GpsStats {
     /* PPS vs TCXO, oscillator-free */
     double tcxoPpsDevNs;      // newest pulse vs trend
     double tcxoPpsRmsNs;      // EW-RMS of that deviation
+    double tcxoFlywheelNs;    // served-anchor correction
+    bool tcxoFlywheelActive;  // PPS filtered through TCXO
 };
 
 class GpsDiscipline {
@@ -300,6 +302,10 @@ private:
   double tcxoPpsFreqNsPerS;          // detrend EWMA, ns/s
   double tcxoPpsDevNs;
   double tcxoPpsRmsNs;
+  // GPS filter: TCXO carries phase
+  double tcxoFlywheelNs;             // smoothed minus raw pulse
+  uint32_t tcxoFwSettle;
+  volatile bool tcxoFwValid;
   void tcxoPpsSample(uint32_t ppsCapTick, uint32_t gpsSec);
   void tcxoUpdate();                 // 1 Hz, from loop()
   bool tcxoCorrPpm(double& out, bool& fromBin) const;

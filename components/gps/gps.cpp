@@ -60,6 +60,10 @@ static const uint32_t kTcxoPrescale = 256;   // real divisor calibrated at runti
 static const double   kTcxoHoldoverFloorPpm = 0.05;        // never claim better than this
 static const int64_t  kHoldoverMaxTcxoUs = 24LL * 3600LL * 1000000LL;
 static const uint32_t kTcxoMinLearnSamples = 60;           // before trusting a correction
+/* GPS flywheel: serve smoothed pulses. */
+static const double   kFwAlpha = 1.0 / 32.0;   // ~30 s pulse averaging
+static const double   kFwClampNs = 500.0;      // beyond this, serve raw
+static const uint32_t kFwSettle = 64;          // pulses before trusting
 static const float    kTcxoTempMin = -40.0f;               // full rated range, 0.5C step
 
 static uint32_t unix_to_ntp_seconds(time_t unixSec) {
@@ -96,6 +100,7 @@ GpsDiscipline::GpsDiscipline()
     tcxoPpsPrevValid(false), tcxoPpsPrevCnt(0), tcxoPpsPrevSub(0),
     tcxoPpsPrevSec(0), tcxoPpsFreqInit(false), tcxoPpsFreqNsPerS(0),
     tcxoPpsDevNs(0), tcxoPpsRmsNs(0),
+    tcxoFlywheelNs(0), tcxoFwSettle(0), tcxoFwValid(false),
     anchorSeq(0), anchorCapTick(0), anchorSec1900(0), anchorFrac(0) {
   memset(tcxoBinPpm, 0, sizeof(tcxoBinPpm));
   memset(tcxoBinN, 0, sizeof(tcxoBinN));
@@ -363,6 +368,7 @@ bool GpsDiscipline::tcxoCorrPpm(double& out, bool& fromBin) const {
 void GpsDiscipline::tcxoPpsSample(uint32_t ppsCapTick, uint32_t gpsSec) {
   if (tcxoCapChannel == nullptr || !tcxoRatioValid) {
     tcxoPpsPrevValid = false;
+    tcxoFwValid = false;
     return;
   }
   uint32_t cnt = 0, raw = 0, s;
@@ -397,9 +403,28 @@ void GpsDiscipline::tcxoPpsSample(uint32_t ppsCapTick, uint32_t gpsSec) {
         tcxoPpsDevNs = resid;
         tcxoPpsRmsNs = sqrt(0.05 * resid * resid + 0.95 * tcxoPpsRmsNs * tcxoPpsRmsNs);
         tcxoPpsFreqNsPerS += (1.0 / 240.0) * (devPerSec - tcxoPpsFreqNsPerS);
+        // flywheel: smoothed minus raw
+        if (resid > -1000.0 && resid < 1000.0) {
+          tcxoFlywheelNs = (1.0 - kFwAlpha) * (tcxoFlywheelNs - resid);
+          if (tcxoFlywheelNs > -kFwClampNs && tcxoFlywheelNs < kFwClampNs) {
+            if (tcxoFwSettle < kFwSettle) tcxoFwSettle++;
+            else tcxoFwValid = true;
+          } else {
+            tcxoFlywheelNs = 0;   // ramp too fast; serve raw
+            tcxoFwSettle = 0;
+            tcxoFwValid = false;
+          }
+        } else {
+          tcxoFlywheelNs = 0;
+          tcxoFwSettle = 0;
+          tcxoFwValid = false;
+        }
       }
     } else {
       tcxoPpsFreqInit = false;   // gap: trend stale
+      tcxoFlywheelNs = 0;
+      tcxoFwSettle = 0;
+      tcxoFwValid = false;
     }
   }
   tcxoPpsPrevValid = true;
@@ -1064,16 +1089,14 @@ void GpsDiscipline::handle_pps_deferred() {
     prevPpsEdgeForOffset = ppsEdgeCapture;
     lastAppliedTotalCorrUs = outlier ? 0 : totalCorrUs;
 
-    // Store PPS reference timestamp with calibration offset applied
-    int64_t calibrationUs = Config::getPpsCalibrationUs();
-    int64_t adjustedPpsSec = (int64_t)ppsSec + (calibrationUs / 1000000);
-    int64_t adjustedPpsFracUs = calibrationUs % 1000000;
-    if (adjustedPpsFracUs < 0) {
-      adjustedPpsSec -= 1;
-      adjustedPpsFracUs += 1000000;
-    }
+    // Calibration plus GPS flywheel: the served anchor sits at the TCXO-
+    // smoothed pulse position, not the raw pulse.
+    double adjSec = (double)Config::getPpsCalibrationUs() * 1e-6
+                  + (tcxoFwValid ? tcxoFlywheelNs * 1e-9 : 0.0);
+    double adjWhole = floor(adjSec);
+    int64_t adjustedPpsSec = (int64_t)ppsSec + (int64_t)adjWhole;
     lastPpsSec1900 = unix_to_ntp_seconds((time_t)adjustedPpsSec);
-    lastPpsFrac = (uint32_t)(((uint64_t)adjustedPpsFracUs << 32) / 1000000ULL);
+    lastPpsFrac = (uint32_t)((adjSec - adjWhole) * 4294967296.0);
     // Anchor pair for NTP timestamp extrapolation — must only advance together
     // with lastPpsSec1900/lastPpsFrac (a holdover pulse must not move it).
     lastPpsMonotonicUs = ppsEdgeCapture;
@@ -1226,6 +1249,8 @@ void GpsDiscipline::getStats(GpsStats& out) const {
   out.rtcTempC      = rtcTempC;
   out.tcxoPpsDevNs  = tcxoPpsDevNs;
   out.tcxoPpsRmsNs  = tcxoPpsRmsNs;
+  out.tcxoFlywheelNs = tcxoFlywheelNs;
+  out.tcxoFlywheelActive = tcxoFwValid;
 }
 
 double GpsDiscipline::getFrequencyPpm() const {

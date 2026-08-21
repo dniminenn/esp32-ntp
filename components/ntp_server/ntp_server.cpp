@@ -371,8 +371,8 @@ static void arpPrimeMark(const uint8_t* ip) {
   s_primedUs = esp_timer_get_time();
 }
 
-void IRAM_ATTR NtpServer::loop() {
-  if (sock < 0) return;
+bool IRAM_ATTR NtpServer::loop() {
+  if (sock < 0) return false;
   /* One instruction, taken unconditionally so the arrival probe below is
    * inside the measured region rather than before it. */
   const uint32_t cLoop = esp_cpu_get_cycle_count();
@@ -423,7 +423,7 @@ void IRAM_ATTR NtpServer::loop() {
     // and stamp t2 *before* clocking the payload out over SPI, so the SPI read
     // duration no longer inflates the receive timestamp.
     const int32_t rsr = w5k_rx_ready((uint8_t)sock);
-    if (rsr < 48 + 8) return;
+    if (rsr < 48 + 8) return false;
     cA = esp_cpu_get_cycle_count();
     // Prefer the hardware-captured arrival edge (INTn ISR). If a fresh IRQ has
     // fired since the last packet we handled, use its latched timestamp — this
@@ -460,10 +460,10 @@ void IRAM_ATTR NtpServer::loop() {
     cC = esp_cpu_get_cycle_count();
   }
 
-  if (n <= 0) return;
+  if (n <= 0) return false;
   if (n < 48) {
     ESP_LOGW(TAG, "Short NTP request (%d bytes) from %d.%d.%d.%d", n, from_ip[0], from_ip[1], from_ip[2], from_ip[3]);
-    return;
+    return true;
   }
 
   // Only answer client requests (mode 3; mode 0 for ancient v3 hosts).
@@ -472,7 +472,7 @@ void IRAM_ATTR NtpServer::loop() {
   uint8_t reqMode = req[0] & 0x07;
   if (reqMode != 3 && reqMode != 0) {
     ESP_LOGD(TAG, "Ignoring mode-%d packet from %d.%d.%d.%d", reqMode, from_ip[0], from_ip[1], from_ip[2], from_ip[3]);
-    return;
+    return true;
   }
 
   bool locked = (gps && gps->isLocked());
@@ -659,7 +659,7 @@ void IRAM_ATTR NtpServer::loop() {
       ESP_LOGD(TAG, "Replied to %d.%d.%d.%d:%u (stratum %d, LI=%d)",
                from_ip[0], from_ip[1], from_ip[2], from_ip[3], (unsigned)from_port, rsp[1], li);
     }
-    return;
+    return true;
   }
 
   // W5500: prime ARP first. This is load-bearing, not just a timing nicety — the
@@ -682,7 +682,7 @@ void IRAM_ATTR NtpServer::loop() {
     /* The W5500 exposes no way to query its ARP cache, so rely on having
      * resolved this peer earlier: a real client that is now over budget was
      * warmed by its own first request, while a spoofed source never was. */
-    if (!bucketWarm[b]) return;
+    if (!bucketWarm[b]) return true;
   } else {
     PrimeAction pa = arpPrimeAction(from_ip);
     if (pa == PRIME_NOW) {
@@ -691,7 +691,7 @@ void IRAM_ATTR NtpServer::loop() {
       if (w5k_arp_prime((uint8_t)sock, from_ip) != 0) {
         ESP_LOGW(TAG, "ARP unresolved for %d.%d.%d.%d — dropping reply",
                  from_ip[0], from_ip[1], from_ip[2], from_ip[3]);
-        return;
+        return true;
       }
       primeTxn1 = g_w5k_txns;
       arpPrimeMark(from_ip);
@@ -844,7 +844,7 @@ void IRAM_ATTR NtpServer::loop() {
      * not advanced, so the space is gone until the socket is reopened. */
     ESP_LOGW(TAG, "W5500 send did not complete — reopening socket");
     reopenSocket();
-    return;
+    return true;
   }
   if (sret == (int32_t)sizeof(rsp)) {
     requestCount++;
@@ -960,4 +960,5 @@ void IRAM_ATTR NtpServer::loop() {
     if (w5k_arp_prime((uint8_t)sock, from_ip) == 0) arpPrimeMark(from_ip);
     else s_primedUs = 0;
   }
+  return true;
 }
