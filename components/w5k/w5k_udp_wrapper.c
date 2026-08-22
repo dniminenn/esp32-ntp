@@ -2,6 +2,7 @@
 
 #include "w5k_udp_wrapper.h"
 #include "esp_timer.h"
+#include "esp_rom_sys.h"
 #include "w5500_drv.h"
 #include "w5500_fast.h"
 #include <string.h>
@@ -220,10 +221,13 @@ IRAM_ATTR int w5k_send_stamp_and_fire(uint8_t socket_num, uint16_t off,
 
 /* Reap the completion. Call after timing has stopped. */
 IRAM_ATTR int w5k_send_reap(uint8_t socket_num) {
+  /* quiet bus during frame egress */
+  esp_rom_delay_us(10);
   /* A fixed iteration count is a latency cliff: 20000 register reads is ~180 ms
    * of spinning. Bound it in time instead. */
   int64_t deadline = esp_timer_get_time() + 2000;
   while (esp_timer_get_time() < deadline) {
+    esp_rom_delay_us(2);
     uint8_t ir = 0;
     g_w5k_reap_polls++;
     w5k_xfer_rd(W5500_SREG(socket_num, W5500_SN_IR), &ir, 1);
