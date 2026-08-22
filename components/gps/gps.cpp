@@ -1094,9 +1094,12 @@ void GpsDiscipline::handle_pps_deferred() {
     double adjSec = (double)Config::getPpsCalibrationUs() * 1e-6
                   + (tcxoFwValid ? tcxoFlywheelNs * 1e-9 : 0.0);
     double adjWhole = floor(adjSec);
-    int64_t adjustedPpsSec = (int64_t)ppsSec + (int64_t)adjWhole;
+    // rounding may carry a second
+    uint64_t adjFrac64 = (uint64_t)llround((adjSec - adjWhole) * 4294967296.0);
+    int64_t adjustedPpsSec = (int64_t)ppsSec + (int64_t)adjWhole
+                           + (int64_t)(adjFrac64 >> 32);
     lastPpsSec1900 = unix_to_ntp_seconds((time_t)adjustedPpsSec);
-    lastPpsFrac = (uint32_t)((adjSec - adjWhole) * 4294967296.0);
+    lastPpsFrac = (uint32_t)adjFrac64;
     // Anchor pair for NTP timestamp extrapolation — must only advance together
     // with lastPpsSec1900/lastPpsFrac (a holdover pulse must not move it).
     lastPpsMonotonicUs = ppsEdgeCapture;

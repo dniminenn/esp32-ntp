@@ -315,8 +315,12 @@ void IRAM_ATTR NtpServer::computeNtpTimestamp(uint64_t monoUs, bool locked, uint
       uint64_t rawDelta = (uint64_t)signedDelta;
       int64_t freqCorr = (int64_t)(-gps->getFrequencyPpm() * 1e-6 * (double)rawDelta);
       uint64_t correctedDelta = rawDelta + freqCorr;
-      sec1900 = ppsSec1900 + (uint32_t)(correctedDelta / 1000000ULL);
-      frac = (uint32_t)(((correctedDelta % 1000000ULL) << 32) / 1000000ULL);
+      // ppsFrac carries the flywheel
+      uint64_t frac64 = (uint64_t)ppsFrac
+                      + (((correctedDelta % 1000000ULL) << 32) / 1000000ULL);
+      sec1900 = ppsSec1900 + (uint32_t)(correctedDelta / 1000000ULL)
+              + (uint32_t)(frac64 >> 32);
+      frac = (uint32_t)frac64;
       return;
     }
   }
