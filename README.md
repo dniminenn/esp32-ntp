@@ -121,7 +121,7 @@ almost always one of those rather than the ESP32.
   observed live, and the TCXO's own residual error is learned against GPS per 0.5 °C of its die
   temperature while locked (persisted in NVS, at most one ~1.5 KB write per hour). Holdover
   dispersion then grows at the learned residual (floored at 0.05 ppm) instead of quadratically,
-  and the holdover budget stretches from 1 h to 24 h. The TCXO also flywheels the PPS while
+  and the holdover budget stretches from 1 h to ~55 h (72 h cap; the 10 ms dispersion ceiling governs). The TCXO also flywheels the PPS while
   locked: served anchors sit at a smoothed pulse position (~30 s averaging), so served phase
   carries ~1.5 ns of receiver jitter instead of each pulse's ~10 ns; the filter stands down by
   itself during fast temperature ramps. Skip the part entirely and nothing changes: all three

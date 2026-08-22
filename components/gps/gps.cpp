@@ -58,7 +58,8 @@ static const double  kHoldoverDriftFloorPpmPerHour = 0.5; // never claim better 
 /* DS3231 TCXO holdover constants. */
 static const uint32_t kTcxoPrescale = 256;   // real divisor calibrated at runtime
 static const double   kTcxoHoldoverFloorPpm = 0.05;        // never claim better than this
-static const int64_t  kHoldoverMaxTcxoUs = 24LL * 3600LL * 1000000LL;
+// dispersion ceiling governs (~55 h)
+static const int64_t  kHoldoverMaxTcxoUs = 72LL * 3600LL * 1000000LL;
 static const uint32_t kTcxoMinLearnSamples = 60;           // before trusting a correction
 /* GPS flywheel: serve smoothed pulses. */
 static const double   kFwAlpha = 1.0 / 32.0;   // ~30 s pulse averaging
