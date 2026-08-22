@@ -139,7 +139,7 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .help="123 is the standard. Clients will not find it anywhere else.",
                        .reboot=true, .advanced=true },
   [CFG_SERVE_CAL]  = { .key="serve.cal", .label="Serve calibration (us)", .group="Service", .type=CF_INT,
-                       .imin=-100000, .imax=100000, .idef=-4,
+                       .imin=-100000, .imax=100000, .idef=-5,
                        .help="Subtracted from t2 and t3. Re-derive before changing.",
                        .advanced=true },
 

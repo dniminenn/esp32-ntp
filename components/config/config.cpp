@@ -53,6 +53,7 @@ int getRtc32kPin() { return cfg_int(CFG_RTC_32K); }
 // With t3 now landing within ~5 us of egress the subtraction stopped being
 // cancelled and over-corrected: served offset sat at -6..-12 us median against
 // the GPS reference across three 60-sample runs. 7 us re-centres it.
+// 2026-08-22: -5, vs timepi ntpqual.
 int getServeCalibrationUs() { return cfg_int(CFG_SERVE_CAL); }
 
 spi_host_device_t getW5500SpiHost() { return (spi_host_device_t)cfg_int(CFG_W5_HOST); }
