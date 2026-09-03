@@ -410,6 +410,10 @@ retry backs off 1 s, 2 s, then 4 s rather than waiting 4 s to notice.
 | `ntp_tcxo_residual_ppm` | Error of the learned TCXO correction; holdover dispersion grows at this rate |
 | `ntp_pps_vs_tcxo_ns` / `_rms_ns` | Each PPS against the TCXO tick stream: pulse quality with no local oscillator in the loop |
 
+**Pull only:** the clock exposes state and never ships it, so there is no broker, no outbound
+connection and no cost when nobody is scraping. For MQTT or Home Assistant, bridge host-side from
+`/metrics` with Telegraf or a scrape integration rather than asking the device to dial out.
+
 **Self-recovery:** the task watchdog is set to reboot, not just warn, so a firmware hang restarts
 the device within seconds. Separately, a W5500 health check restarts the device if the Ethernet chip
 or link stays unresponsive. Both are visible after the fact via `ntp_boot_count` and
