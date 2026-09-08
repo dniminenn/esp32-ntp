@@ -23,6 +23,12 @@ int getSpiClockHz() { return cfg_int(CFG_DISP_HZ); }
 int getSpiMosiPin() { return cfg_int(CFG_DISP_MOSI); }
 int getSpiMisoPin() { return -1; }     // Display doesn't need MISO
 int getSpiSclkPin() { return cfg_int(CFG_DISP_SCLK); }
+int getDisplayType() { return cfg_int(CFG_DISP_TYPE); }
+int getDisplaySdaPin() { return cfg_int(CFG_DISP_SDA); }
+int getDisplaySclPin() { return cfg_int(CFG_DISP_SCL); }
+int getDisplayI2cAddr() { return cfg_int(CFG_DISP_ADDR); }
+int getDisplayRows() { return cfg_int(CFG_DISP_SIZE) ? 64 : 32; }
+bool getDisplayFlip() { return cfg_int(CFG_DISP_FLIP) != 0; }
 
 const char* getTimezone() { return cfg_str(CFG_SYS_TZ); }
 void applyTimezone() { setenv("TZ", cfg_str(CFG_SYS_TZ), 1); tzset(); }

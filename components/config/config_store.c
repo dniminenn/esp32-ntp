@@ -52,7 +52,7 @@ static const char* NVS_NS = "ntpcfg";
 #if CONFIG_IDF_TARGET_ESP32S3
 #define PIN_OUT_MAX 48
 #define PIN_IN_MAX  48
-#define PIN_HELP "ESP32-S3 GPIO. Avoid 19-20 (USB), 26-32 (flash), 33-37 (PSRAM on R8 modules)."
+#define PIN_HELP "ESP32-S3 GPIO. 22-25 do not exist. Avoid 19-20 (USB), 26-32 (flash), 33-37 (PSRAM on R8 modules)."
 #define DEF_W5_CS 10
 #define DEF_W5_MOSI 11
 #define DEF_W5_MISO 13
@@ -76,6 +76,9 @@ static const char* NVS_NS = "ntpcfg";
 #define DEF_GPS_TX 17
 #define DEF_PPS_GPIO 19
 #endif
+
+static const char* const kDispTypes[] = { "max7219", "ssd1306" };
+static const char* const kDispSizes[] = { "128x32", "128x64" };
 
 #ifdef CONFIG_SOC_WIFI_SUPPORTED
 static const char* const kNetModes[] = { "wiznet", "wifi" };
@@ -156,6 +159,9 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
   [CFG_DISP_GLYPH] = { .key="disp.glyph", .label="Show presync glyph", .group="Display", .type=CF_BOOL,
                        .imin=0, .imax=1, .idef=CONFIG_APP_USE_PRESYNC_GLYPH,
                        .help="Marker shown until the GPS locks." },
+  [CFG_DISP_TYPE]  = { .key="disp.type", .label="Display type", .group="Display", .type=CF_ENUM,
+                       .imin=0, .imax=1, .idef=0, .names=kDispTypes,
+                       .help="MAX7219 matrices on SPI, or an SSD1306 OLED on I2C.", .reboot=true },
 
   [CFG_NTP_PORT]   = { .key="ntp.port", .label="NTP port", .group="Service", .type=CF_INT,
                        .imin=1, .imax=65535, .idef=CONFIG_APP_NTP_PORT,
@@ -185,6 +191,19 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
   [CFG_DISP_NDEV]  = { .key="disp.ndev", .label="Cascaded modules", .group="Display wiring", .type=CF_INT,
                        .imin=1, .imax=16, .idef=CONFIG_APP_MAX_DEVICES,
                        .reboot=true, .advanced=true },
+  [CFG_DISP_SDA]   = { .key="disp.sda", .label="OLED SDA pin", .group="Display wiring", .type=CF_INT,
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=-1,
+                       .help="SSD1306 only. Same pins as the DS3231 puts both on one bus.",
+                       .reboot=true, .advanced=true },
+  [CFG_DISP_SCL]   = { .key="disp.scl", .label="OLED SCL pin", .group="Display wiring", .type=CF_INT,
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=-1, .reboot=true, .advanced=true },
+  [CFG_DISP_ADDR]  = { .key="disp.addr", .label="OLED I2C address", .group="Display wiring", .type=CF_INT,
+                       .imin=0x3C, .imax=0x3D, .idef=0x3C, .help="60 = 0x3C on nearly every module, 61 = 0x3D.",
+                       .reboot=true, .advanced=true },
+  [CFG_DISP_SIZE]  = { .key="disp.size", .label="OLED size", .group="Display wiring", .type=CF_ENUM,
+                       .imin=0, .imax=1, .idef=1, .names=kDispSizes, .reboot=true, .advanced=true },
+  [CFG_DISP_FLIP]  = { .key="disp.flip", .label="OLED rotate 180", .group="Display wiring", .type=CF_BOOL,
+                       .imin=0, .imax=1, .idef=0, .reboot=true, .advanced=true },
 
   [CFG_W5_HOST]    = { .key="w5.host", .label="SPI host", .group="W5500 wiring", .type=CF_INT,
                        .imin=1, .imax=2, .idef=SPI2_HOST,

@@ -20,6 +20,8 @@
 #include "config.h"
 #include "config_store.h"
 #include "display.h"
+#include "matrix_display.h"
+#include "ssd1306_display.h"
 #include "ds3231.h"
 #include "gps.h"
 #include "esp_task_wdt.h"
@@ -391,7 +393,12 @@ void app_main() {
 
   if (Config::getUseDisplay()) {
     ESP_LOGI(TAG, "Initializing display...");
-    g_display = new Display(Config::getSpiHost(), Config::getCsPin(), Config::getMaxDevices(), Config::getSpiClockHz());
+    if (Config::getDisplayType() == 1)
+      g_display = new Ssd1306Display(Config::getDisplaySdaPin(), Config::getDisplaySclPin(),
+                                     (uint8_t)Config::getDisplayI2cAddr(), Config::getDisplayRows(),
+                                     Config::getDisplayFlip());
+    else
+      g_display = new MatrixDisplay(Config::getSpiHost(), Config::getCsPin(), Config::getMaxDevices(), Config::getSpiClockHz());
     err = g_display->begin();
     if (err == ESP_OK) {
       ESP_LOGI(TAG, "Display initialized successfully");

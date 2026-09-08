@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 
-#include "display.h"
+#include "matrix_display.h"
+#include "presync_glyph.h"
 #include "config.h"
 #include <string.h>
 
@@ -17,36 +18,36 @@ static const uint8_t font3x5_digits[10][3] = {
   {0x17, 0x15, 0x1F}
 };
 
-Display::Display(spi_host_device_t host, int csPin, int devs, int clockHz)
+MatrixDisplay::MatrixDisplay(spi_host_device_t host, int csPin, int devs, int clockHz)
   : chain(host, csPin, devs, clockHz), devices(devs) {
   screenBuffer = (uint8_t*)malloc(devices * 8);
 }
 
-esp_err_t Display::begin() {
+esp_err_t MatrixDisplay::begin() {
   return chain.begin();
 }
 
-void Display::clear() {
+void MatrixDisplay::clear() {
   if (screenBuffer) memset(screenBuffer, 0x00, devices * 8);
   chain.clear();
 }
 
-void Display::setIntensity(uint8_t intensity) { chain.setIntensity(intensity); }
+void MatrixDisplay::setIntensity(uint8_t intensity) { chain.setIntensity(intensity); }
 
-uint8_t Display::reverseByte(uint8_t b) {
+uint8_t MatrixDisplay::reverseByte(uint8_t b) {
   b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
   b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
   b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
   return b;
 }
 
-void Display::drawDigit(int digit, int startCol) {
+void MatrixDisplay::drawDigit(int digit, int startCol) {
   if (digit < 0 || digit > 9 || startCol + 3 > devices * 8) return;
   char digitChar = '0' + digit;
   drawCharToBuffer(digitChar, startCol);
 }
 
-void Display::drawCharToBuffer(char c, int startCol) {
+void MatrixDisplay::drawCharToBuffer(char c, int startCol) {
   if (!screenBuffer) return;
   if (startCol + 3 > devices * 8) return;
   if (c >= '0' && c <= '9') {
@@ -59,7 +60,7 @@ void Display::drawCharToBuffer(char c, int startCol) {
   }
 }
 
-void Display::drawColon(int col) {
+void MatrixDisplay::drawColon(int col) {
   if (!screenBuffer) return;
   if (col >= devices * 8) return;
   // Preserve bit 0 (top row)
@@ -67,7 +68,7 @@ void Display::drawColon(int col) {
   screenBuffer[col] = (uint8_t)((0x14 << 1) | topBit);
 }
 
-void Display::drawTime(int hours, int minutes, int seconds) {
+void MatrixDisplay::drawTime(int hours, int minutes, int seconds) {
   if (!screenBuffer) return;
   int col = 2;
   drawDigit(hours / 10, col); col += 3; col += 1;
@@ -80,7 +81,7 @@ void Display::drawTime(int hours, int minutes, int seconds) {
   drawDigit(seconds % 10, col);
 }
 
-void Display::drawTopRowFromCentiseconds(unsigned long long centiseconds) {
+void MatrixDisplay::drawTopRowFromCentiseconds(unsigned long long centiseconds) {
   if (!screenBuffer) return;
   int totalCols = devices * 8;
   
@@ -91,7 +92,7 @@ void Display::drawTopRowFromCentiseconds(unsigned long long centiseconds) {
   }
 }
 
-void Display::drawPreSyncGlyph() {
+void MatrixDisplay::drawPreSyncGlyph() {
   if (!Config::getUsePreSyncGlyph()) return;
   if (!screenBuffer) return;
   if (devices < 4) return;
@@ -120,17 +121,13 @@ void Display::drawPreSyncGlyph() {
     }
   };
 
-  const uint8_t glyph_rightmost[8] = {0x00,0x00,0x1e,0xe1,0x07,0xe1,0x1e,0x00};
-  const uint8_t glyph_middle[8]    = {0x00,0x00,0x00,0xff,0x00,0xff,0x00,0x00};
-  const uint8_t glyph_leftmost[8]  = {0x70,0x88,0x88,0x7f,0x70,0x8f,0x88,0x70};
-
-  writeDeviceRows(rightmost, glyph_rightmost);
-  writeDeviceRows(secondRight, glyph_middle);
-  writeDeviceRows(secondLeft, glyph_middle);
-  writeDeviceRows(leftmost, glyph_leftmost);
+  writeDeviceRows(leftmost, kPreSyncTiles[0]);
+  writeDeviceRows(secondLeft, kPreSyncTiles[1]);
+  writeDeviceRows(secondRight, kPreSyncTiles[2]);
+  writeDeviceRows(rightmost, kPreSyncTiles[3]);
 }
 
-void Display::push() {
+void MatrixDisplay::push() {
   if (!screenBuffer) return;
   chain.setUpdateMode(false);
   for (int col = 0; col < (devices * 8); col++) {

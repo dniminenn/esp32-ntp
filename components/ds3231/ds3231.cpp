@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 
 #include "ds3231.h"
+#include "i2c_bus.h"
 #include <string.h>
 #include "esp_log.h"
 #include "civil_time.h"
@@ -25,22 +26,13 @@ static uint8_t bin2bcd(uint8_t v) { return (uint8_t)(((v / 10) << 4) | (v % 10))
 
 
 esp_err_t Ds3231::begin(int sdaPin, int sclPin) {
-  i2c_master_bus_config_t buscfg = {};
-  buscfg.i2c_port = -1;                       // any free controller
-  buscfg.sda_io_num = (gpio_num_t)sdaPin;
-  buscfg.scl_io_num = (gpio_num_t)sclPin;
-  buscfg.clk_source = I2C_CLK_SRC_DEFAULT;
-  buscfg.glitch_ignore_cnt = 7;
-  // internal pull-up, harmless extra
-  buscfg.flags.enable_internal_pullup = 1;
-  esp_err_t err = i2c_new_master_bus(&buscfg, &bus);
+  esp_err_t err = i2c_bus_get(sdaPin, sclPin, &bus);
   if (err != ESP_OK) return err;
 
   err = i2c_master_probe(bus, kAddr, kTimeoutMs);
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "no DS3231 at 0x%02x (SDA=%d SCL=%d): %s",
              kAddr, sdaPin, sclPin, esp_err_to_name(err));
-    i2c_del_master_bus(bus);
     bus = nullptr;
     return ESP_ERR_NOT_FOUND;
   }
@@ -51,7 +43,6 @@ esp_err_t Ds3231::begin(int sdaPin, int sclPin) {
   devcfg.scl_speed_hz = 100000;               // 100k for long wires
   err = i2c_master_bus_add_device(bus, &devcfg, &dev);
   if (err != ESP_OK) {
-    i2c_del_master_bus(bus);
     bus = nullptr;
     return err;
   }

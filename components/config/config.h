@@ -22,6 +22,13 @@ int getSpiClockHz();
 int getSpiMosiPin();
 int getSpiMisoPin();
 int getSpiSclkPin();
+// SSD1306 OLED (disp.type = 1)
+int getDisplayType();
+int getDisplaySdaPin();
+int getDisplaySclPin();
+int getDisplayI2cAddr();
+int getDisplayRows();
+bool getDisplayFlip();
 
 const char* getTimezone();
 void applyTimezone();
