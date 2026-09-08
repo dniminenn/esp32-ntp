@@ -1,0 +1,13 @@
+# Settings to flash into NVS before the device has ever reached the network: make nvs SETTINGS=settings.csv
+# One row per key. Keys, types and ranges are the ones on the settings page and in the README table.
+# Numbers and bools are i32, text is string. Delete the rows you do not need.
+key,type,encoding,value
+ntpcfg,namespace,,
+w5.cs,data,i32,10
+w5.mosi,data,i32,11
+w5.sclk,data,i32,12
+w5.miso,data,i32,13
+w5.int,data,i32,14
+w5.rst,data,i32,9
+pps.gpio,data,i32,4
+net.mode,data,i32,0

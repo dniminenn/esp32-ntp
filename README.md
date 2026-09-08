@@ -229,6 +229,15 @@ Set a password under **System** unless the network is fully trusted: without one
 reach the address can reconfigure or reboot the clock. `/metrics` stays unauthenticated either way
 so Prometheus can scrape it.
 
+### First boot without a network
+
+The wiring settings live behind the page, and the page is behind the W5500 those settings wire up.
+For a board whose defaults do not match, copy `settings.example.csv` to `settings.csv`, keep the rows
+you need, and run `make nvs PORT=/dev/ttyACM0`. That builds an NVS image with ESP-IDF's partition
+generator and flashes it over the same cable as the firmware; the next boot loads it exactly as if
+the page had saved it. `make nvs-erase` wipes the settings partition and returns to the build-time
+defaults. Keys, types and ranges are the ones in the tables below.
+
 ### Locking it down
 
 Once a clock is configured and in service, the settings page is pure attack surface. Two controls,

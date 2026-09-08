@@ -20,7 +20,12 @@ IDF_WANT := $(shell awk '/^  idf:/{f=1} f && /^    version:/{print $$2; exit}' d
 IDF_HAVE := $(shell sed -n 's/^set(IDF_VERSION_[A-Z]* \([0-9]*\))$$/\1/p' $(IDF_PATH)/tools/cmake/version.cmake 2>/dev/null | paste -sd.)
 DOCKER_IMAGE ?= espressif/idf:v$(IDF_WANT)
 
-.PHONY: all target build docker-build flash monitor flash-monitor erase clean fullclean size menuconfig doctor
+# Settings image for a board that cannot reach its own settings page yet. See settings.example.csv.
+SETTINGS ?= settings.csv
+NVS_OFFSET := $(shell awk -F, '/^nvs,/{gsub(/ /,"");print $$4}' partitions.csv)
+NVS_SIZE := $(shell awk -F, '/^nvs,/{gsub(/ /,"");print $$5}' partitions.csv)
+
+.PHONY: all target build docker-build nvs nvs-erase flash monitor flash-monitor erase clean fullclean size menuconfig doctor
 
 all: build
 
@@ -58,6 +63,15 @@ fullclean:
 
 doctor:
 	$(IDF_EXPORT) idf.py doctor
+
+nvs:
+	@test -f "$(SETTINGS)" || { echo "$(SETTINGS) not found, start from settings.example.csv"; exit 1; }
+	@mkdir -p build
+	$(IDF_EXPORT) python -m esp_idf_nvs_partition_gen generate "$(SETTINGS)" build/settings.bin $(NVS_SIZE)
+	$(IDF_EXPORT) python -m esptool -p $(PORT) -b $(BAUD) write-flash $(NVS_OFFSET) build/settings.bin
+
+nvs-erase:
+	$(IDF_EXPORT) python -m esptool -p $(PORT) -b $(BAUD) erase-region $(NVS_OFFSET) $(NVS_SIZE)
 
 # Same toolchain CI uses, no local IDF needed. Always a clean build.
 docker-build:
