@@ -104,8 +104,10 @@ almost always one of those rather than the ESP32.
   hardware receive timestamp this silicon can offer.
 - **Toolchain:** ESP-IDF **v6.0**. Earlier versions predate the split driver components
   (`esp_driver_gpio`, `esp_driver_uart`, `esp_driver_spi`, `esp_driver_mcpwm`) that this project
-  requires, so they fail at configure time rather than building something subtly wrong. CI builds
-  v6.0.2 from a clean clone.
+  requires, so they fail at configure time rather than building something subtly wrong. The
+  manifest in `main/idf_component.yml` pins `>=6.0.2,<7.0` and the component manager enforces it.
+  CI builds v6.0.2 from a clean clone in Espressif's `espressif/idf:v6.0.2` image, and
+  `make docker-build` runs the same image locally, so that is the only toolchain vouched for.
 - **Crystal:** the build pins 40 MHz (`CONFIG_XTAL_FREQ`); some modules ship with a 26 MHz crystal
   instead, and the tell is garbage on the serial console at 115200. If that's your board, change
   `CONFIG_XTAL_FREQ` in `menuconfig`.
@@ -178,13 +180,15 @@ make flash          # flash firmware (override speed with: make flash BAUD=23040
 make monitor        # open the serial console
 make flash-monitor  # flash then monitor
 make menuconfig      # open project configuration
+make docker-build   # clean build in espressif/idf:v6.0.2, no local IDF needed
 ```
 
 `sdkconfig` is generated, not tracked: `idf.py set-target` writes it from `sdkconfig.defaults`,
 which holds every setting this project relies on. `make build TARGET=esp32s3` runs set-target
 when the current `sdkconfig` was generated for a different chip, then builds; a bare `make build`
 keeps whatever target is current. Switching targets is a full rebuild, as it is in ESP-IDF.
-`PORT` picks the first of `/dev/ttyUSB0` and `/dev/ttyACM0` unless given.
+`PORT` picks the first of `/dev/ttyUSB0` and `/dev/ttyACM0` unless given. If the IDF at `IDF_PATH`
+is not the version in `dependencies.lock`, `make` says so before building.
 
 Or call `idf.py` directly if you prefer.
 
