@@ -16,6 +16,7 @@ __pycache__/
 *.pyc
 
 # ESP-IDF generated files we don't track
+/sdkconfig
 /sdkconfig.old
 
 # Logs

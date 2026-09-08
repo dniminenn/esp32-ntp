@@ -71,7 +71,7 @@ almost always one of those rather than the ESP32.
   | Target | MCPWM | Usable SPI | WiFi | Verdict |
   |---|---|---|---|---|
   | **ESP32** | yes | 2 | yes | **Supported. The only part built and measured.** |
-  | **ESP32-S3** | yes | 2 | yes | **Meets every requirement. Never built here.** |
+  | **ESP32-S3** | yes | 2 | yes | **Builds and boots. Not measured; no W5500 on the bench board yet.** |
   | ESP32-C5 | yes | 1 | yes | Only without the display, one bus for the W5500 |
   | ESP32-C6 | yes | 1 | yes | Only without the display, one bus for the W5500 |
   | ESP32-S2 | no | 2 | yes | Impossible, no MCPWM |
@@ -85,9 +85,14 @@ almost always one of those rather than the ESP32.
 
   The four "impossible" rows have no MCPWM and no path forward. Everything else builds from the same
   source with no configuration change; dropping the WiFi path saves about 488 KB of flash where it
-  is not available. Anything other than the ESP32 also needs the pin map revisited, which assumes
-  ESP32 GPIO numbering and its input-only 34 to 39, and none of them have been built or measured
-  here.
+  is not available. The pin map is per target: the ESP32 defaults assume its GPIO numbering and
+  input-only 34 to 39, and the ESP32-S3 gets its own defaults because 22 to 25 do not exist there,
+  26 to 32 carry the flash, 33 to 37 carry the PSRAM on R8 modules and 19 to 20 are USB. Nothing but
+  the ESP32 has been measured.
+
+  ESP32-S3 defaults: W5500 CS 10, MOSI 11, SCLK 12, MISO 13 (the SPI2 IOMUX pins), INT 14, RST 9;
+  display CS 5, MOSI 6, SCLK 7; GPS RX 18, TX 21; PPS 4. Every other target uses the ESP32 numbers
+  and needs the pins set from the management page before anything works.
 
   **The ESP32-P4 is a special case: it builds, and you should not.** It is the one part in the
   family whose Ethernet MAC does IEEE 1588v2 hardware timestamping
@@ -174,6 +179,11 @@ make monitor        # open the serial console
 make flash-monitor  # flash then monitor
 make menuconfig      # open project configuration
 ```
+
+Other targets build beside the ESP32 tree instead of replacing it: `make build TARGET=esp32s3`
+uses `build-esp32s3/` and `sdkconfig.esp32s3`, seeded from `sdkconfig.defaults`. Pass the same
+`TARGET` to `flash` and `monitor`; `PORT` picks the first of `/dev/ttyUSB0` and `/dev/ttyACM0`
+unless given. Calling `idf.py set-target esp32s3` directly works too but rewrites `sdkconfig`.
 
 Or call `idf.py` directly if you prefer.
 
@@ -284,6 +294,9 @@ Every runtime setting, generated from the single table in
 |---|---|---|---|---|
 | `ntp.port` | int | `1`..`65535` | R A | NTP port. 123 is the standard. Clients will not find it anywhere else. |
 | `serve.cal` | int | `-100000`..`100000` | A | Serve calibration (us). Subtracted from t2 and t3. Re-derive before changing. |
+
+Pin ranges below are the ESP32 ones. On the ESP32-S3 every pin field accepts `-1`..`48` and the
+defaults are the S3 set listed under the MCU requirements above.
 
 #### Display wiring
 
