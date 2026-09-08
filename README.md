@@ -176,8 +176,8 @@ would sit in the milliseconds.
 ## Build and flash
 
 Prerequisites:
-- ESP-IDF v6.0 installed, with `IDF_PATH` set. CI builds v6.0.2; earlier versions do not have the
-  split driver components this project requires.
+- ESP-IDF v6.0.2 or a later 6.0.x, with `IDF_PATH` set, or Docker for `make docker-build`. Earlier
+  versions do not have the split driver components this project requires.
 
 ```bash
 make build          # idf.py build
@@ -193,7 +193,8 @@ which holds every setting this project relies on. `make build TARGET=esp32s3` ru
 when the current `sdkconfig` was generated for a different chip, then builds; a bare `make build`
 keeps whatever target is current. Switching targets is a full rebuild, as it is in ESP-IDF.
 `PORT` picks the first of `/dev/ttyUSB0` and `/dev/ttyACM0` unless given. If the IDF at `IDF_PATH`
-is not the version in `dependencies.lock`, `make` says so before building.
+is not the version in `dependencies.lock`, `make` says so before building. Switching targets also
+rewrites the `target:` line in `dependencies.lock`; that flip is noise, not a change to commit.
 
 Or call `idf.py` directly if you prefer.
 
