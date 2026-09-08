@@ -180,10 +180,11 @@ make flash-monitor  # flash then monitor
 make menuconfig      # open project configuration
 ```
 
-Other targets build beside the ESP32 tree instead of replacing it: `make build TARGET=esp32s3`
-uses `build-esp32s3/` and `sdkconfig.esp32s3`, seeded from `sdkconfig.defaults`. Pass the same
-`TARGET` to `flash` and `monitor`; `PORT` picks the first of `/dev/ttyUSB0` and `/dev/ttyACM0`
-unless given. Calling `idf.py set-target esp32s3` directly works too but rewrites `sdkconfig`.
+`sdkconfig` is generated, not tracked: `idf.py set-target` writes it from `sdkconfig.defaults`,
+which holds every setting this project relies on. `make build TARGET=esp32s3` runs set-target
+when the current `sdkconfig` was generated for a different chip, then builds; a bare `make build`
+keeps whatever target is current. Switching targets is a full rebuild, as it is in ESP-IDF.
+`PORT` picks the first of `/dev/ttyUSB0` and `/dev/ttyACM0` unless given.
 
 Or call `idf.py` directly if you prefer.
 
