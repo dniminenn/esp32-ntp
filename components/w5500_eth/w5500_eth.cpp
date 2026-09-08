@@ -169,10 +169,8 @@ static void IRAM_ATTR w5k_fifo_xfer(uint16_t total, bool want_rx) {
 #endif
   spi_ll_dma_rx_enable(hw, 0);
   spi_ll_dma_tx_enable(hw, 0);
-  spi_ll_dma_tx_fifo_reset(hw);
   spi_ll_dma_rx_fifo_reset(hw);
   spi_ll_cpu_tx_fifo_reset(hw);
-  spi_ll_cpu_rx_fifo_reset(hw);
 
   hw->user.usr_mosi_highpart = 0;
   hw->user.usr_miso_highpart = 0;
@@ -345,7 +343,10 @@ esp_err_t W5500Eth::begin(spi_host_device_t spiHost, int mosiPin, int misoPin, i
   io_conf.pin_bit_mask = (1ULL << csPin);
   io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
   io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-  gpio_config(&io_conf);
+  if (gpio_config(&io_conf) != ESP_OK) {
+    ESP_LOGE(TAG, "CS pin %d is not a usable GPIO on this chip", csPin);
+    return ESP_ERR_INVALID_ARG;
+  }
   gpio_set_level((gpio_num_t)csPin, 1);
   /* Direct CS toggling on the reply path needs GPIO_OUT, which only covers
    * pins 0-31; anything higher falls back to gpio_set_level(). */
@@ -353,7 +354,10 @@ esp_err_t W5500Eth::begin(spi_host_device_t spiHost, int mosiPin, int misoPin, i
 
   if (rstPin >= 0) {
     io_conf.pin_bit_mask = (1ULL << rstPin);
-    gpio_config(&io_conf);
+    if (gpio_config(&io_conf) != ESP_OK) {
+      ESP_LOGE(TAG, "RST pin %d is not a usable GPIO on this chip", rstPin);
+      return ESP_ERR_INVALID_ARG;
+    }
     gpio_set_level((gpio_num_t)rstPin, 1);
   }
 
