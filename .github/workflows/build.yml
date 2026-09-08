@@ -1,5 +1,5 @@
-# Clean-clone build check: catches IDF compatibility rot and committed-config
-# drift before a contributor does. Pinned to the IDF version in dependencies.lock.
+# Clean-clone build check for every supported target: catches IDF compatibility rot
+# before a contributor does. Pinned to the IDF version in dependencies.lock.
 name: build
 
 on:
@@ -10,9 +10,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [esp32, esp32s3]
     steps:
       - uses: actions/checkout@v4
       - uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.0.2
-          target: esp32
+          target: ${{ matrix.target }}
