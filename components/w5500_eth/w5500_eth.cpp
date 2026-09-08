@@ -163,10 +163,16 @@ static void IRAM_ATTR w5k_fifo_xfer(uint16_t total, bool want_rx) {
   spi_dev_t* hw = s_hw;
 
   /* Make sure nothing is still driving the peripheral from DMA. */
+#if CONFIG_IDF_TARGET_ESP32
   hw->dma_out_link.start = 0;
   hw->dma_in_link.start = 0;
-  hw->dma_conf.val |= SPI_LL_DMA_FIFO_RST_MASK;
-  hw->dma_conf.val &= ~SPI_LL_DMA_FIFO_RST_MASK;
+#endif
+  spi_ll_dma_rx_enable(hw, 0);
+  spi_ll_dma_tx_enable(hw, 0);
+  spi_ll_dma_tx_fifo_reset(hw);
+  spi_ll_dma_rx_fifo_reset(hw);
+  spi_ll_cpu_tx_fifo_reset(hw);
+  spi_ll_cpu_rx_fifo_reset(hw);
 
   hw->user.usr_mosi_highpart = 0;
   hw->user.usr_miso_highpart = 0;
@@ -177,6 +183,7 @@ static void IRAM_ATTR w5k_fifo_xfer(uint16_t total, bool want_rx) {
   spi_ll_write_buffer(hw, s_fast_tx, bits);
 
   spi_ll_clear_int_stat(hw);
+  spi_ll_apply_config(hw);
   spi_ll_user_start(hw);
   /*
    * Deliberately unbounded. If this spin ever fails to complete, the SPI
