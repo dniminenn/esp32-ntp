@@ -15,11 +15,17 @@ PORT ?= $(firstword $(wildcard /dev/ttyUSB0 /dev/ttyACM0) /dev/ttyUSB0)
 BAUD ?= 921600
 JOBS ?= $(shell nproc)
 
-.PHONY: all target build flash monitor flash-monitor erase clean fullclean size menuconfig doctor
+# The IDF version this tree was last configured with, and the one at IDF_PATH.
+IDF_WANT := $(shell sed -n 's/^    version: \([0-9.]*\)$$/\1/p' dependencies.lock)
+IDF_HAVE := $(shell sed -n 's/^set(IDF_VERSION_[A-Z]* \([0-9]*\))$$/\1/p' $(IDF_PATH)/tools/cmake/version.cmake 2>/dev/null | paste -sd.)
+DOCKER_IMAGE ?= espressif/idf:v$(IDF_WANT)
+
+.PHONY: all target build docker-build flash monitor flash-monitor erase clean fullclean size menuconfig doctor
 
 all: build
 
 target:
+	@if [ -n "$(IDF_HAVE)" ] && [ "$(IDF_HAVE)" != "$(IDF_WANT)" ]; then echo "warning: IDF $(IDF_HAVE) at $(IDF_PATH), this tree is built against $(IDF_WANT)"; fi
 	@if [ "$(CUR_TARGET)" != "$(TARGET)" ]; then $(IDF_EXPORT) idf.py set-target $(TARGET); fi
 
 build: target
@@ -51,5 +57,9 @@ fullclean:
 
 doctor:
 	$(IDF_EXPORT) idf.py doctor
+
+# Same toolchain CI uses, no local IDF needed. Always a clean build.
+docker-build:
+	docker run --rm -u $(shell id -u):$(shell id -g) -e HOME=/tmp -v $(CURDIR):/project -w /project $(DOCKER_IMAGE) idf.py set-target $(TARGET) build
 
 
