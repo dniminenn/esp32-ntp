@@ -95,17 +95,23 @@ config APP_SPI_HOST
 
 config APP_SPI_MOSI_PIN
     int "SPI MOSI GPIO"
+    range 0 48 if IDF_TARGET_ESP32S3
     range 0 39
+    default 6 if IDF_TARGET_ESP32S3
     default 23
 
 config APP_SPI_SCLK_PIN
     int "SPI SCLK GPIO"
+    range 0 48 if IDF_TARGET_ESP32S3
     range 0 39
+    default 7 if IDF_TARGET_ESP32S3
     default 18
 
 config APP_CS_PIN
     int "MAX7219 CS GPIO"
+    range 0 48 if IDF_TARGET_ESP32S3
     range 0 39
+    default 5 if IDF_TARGET_ESP32S3
     default 5
 
 config APP_MAX_DEVICES

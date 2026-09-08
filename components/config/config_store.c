@@ -49,8 +49,33 @@ static const char* NVS_NS = "ntpcfg";
 #define DEF_DISP_EN 0
 #endif
 
-#define PIN_OUT -1, 33
-#define PIN_IN  -1, 39
+#if CONFIG_IDF_TARGET_ESP32S3
+#define PIN_OUT_MAX 48
+#define PIN_IN_MAX  48
+#define PIN_HELP "ESP32-S3 GPIO. Avoid 19-20 (USB), 26-32 (flash), 33-37 (PSRAM on R8 modules)."
+#define DEF_W5_CS 10
+#define DEF_W5_MOSI 11
+#define DEF_W5_MISO 13
+#define DEF_W5_SCLK 12
+#define DEF_W5_INT 14
+#define DEF_W5_RST 9
+#define DEF_GPS_RX 18
+#define DEF_GPS_TX 21
+#define DEF_PPS_GPIO 4
+#else
+#define PIN_OUT_MAX 33
+#define PIN_IN_MAX  39
+#define PIN_HELP "ESP32 GPIO. 34-39 are input-only."
+#define DEF_W5_CS 25
+#define DEF_W5_MOSI 33
+#define DEF_W5_MISO 35
+#define DEF_W5_SCLK 32
+#define DEF_W5_INT 34
+#define DEF_W5_RST 26
+#define DEF_GPS_RX 16
+#define DEF_GPS_TX 17
+#define DEF_PPS_GPIO 19
+#endif
 
 #ifdef CONFIG_SOC_WIFI_SUPPORTED
 static const char* const kNetModes[] = { "wiznet", "wifi" };
@@ -93,8 +118,6 @@ static const char* const kTzOpts[] = {
   "SAST-2",                                  "South Africa",
   NULL
 };
-
-#define PIN_HELP "ESP32 GPIO. 34-39 are input-only."
 
 const cfg_field_t g_cfg_fields[CFG_COUNT] = {
   [CFG_NET_MODE] = { .key="net.mode", .label="Interface", .group="Network", .type=CF_ENUM,
@@ -148,13 +171,13 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .help="1 = SPI2, 2 = SPI3. Must differ from the W5500 host.",
                        .reboot=true, .advanced=true },
   [CFG_DISP_CS]    = { .key="disp.cs", .label="CS pin", .group="Display wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=CONFIG_APP_CS_PIN, .help=PIN_HELP,
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=CONFIG_APP_CS_PIN, .help=PIN_HELP,
                        .reboot=true, .advanced=true },
   [CFG_DISP_MOSI]  = { .key="disp.mosi", .label="MOSI pin", .group="Display wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=CONFIG_APP_SPI_MOSI_PIN,
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=CONFIG_APP_SPI_MOSI_PIN,
                        .reboot=true, .advanced=true },
   [CFG_DISP_SCLK]  = { .key="disp.sclk", .label="SCLK pin", .group="Display wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=CONFIG_APP_SPI_SCLK_PIN,
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=CONFIG_APP_SPI_SCLK_PIN,
                        .reboot=true, .advanced=true },
   [CFG_DISP_HZ]    = { .key="disp.hz", .label="SPI clock (Hz)", .group="Display wiring", .type=CF_INT,
                        .imin=100000, .imax=20000000, .idef=CONFIG_APP_SPI_CLOCK_HZ,
@@ -168,18 +191,18 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .help="1 = SPI2, 2 = SPI3. Must differ from the display host.",
                        .reboot=true, .advanced=true },
   [CFG_W5_CS]      = { .key="w5.cs", .label="CS pin", .group="W5500 wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=25, .help=PIN_HELP, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=DEF_W5_CS, .help=PIN_HELP, .reboot=true, .advanced=true },
   [CFG_W5_MOSI]    = { .key="w5.mosi", .label="MOSI pin", .group="W5500 wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=33, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=DEF_W5_MOSI, .reboot=true, .advanced=true },
   [CFG_W5_MISO]    = { .key="w5.miso", .label="MISO pin", .group="W5500 wiring", .type=CF_INT,
-                       .imin=-1, .imax=39, .idef=35, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_IN_MAX, .idef=DEF_W5_MISO, .reboot=true, .advanced=true },
   [CFG_W5_SCLK]    = { .key="w5.sclk", .label="SCLK pin", .group="W5500 wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=32, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=DEF_W5_SCLK, .reboot=true, .advanced=true },
   [CFG_W5_INT]     = { .key="w5.int", .label="INT pin", .group="W5500 wiring", .type=CF_INT,
-                       .imin=-1, .imax=39, .idef=34,
+                       .imin=-1, .imax=PIN_IN_MAX, .idef=DEF_W5_INT,
                        .help="Hardware RX timestamping depends on this.", .reboot=true, .advanced=true },
   [CFG_W5_RST]     = { .key="w5.rst", .label="RST pin", .group="W5500 wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=26, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=DEF_W5_RST, .reboot=true, .advanced=true },
   [CFG_W5_HZ]      = { .key="w5.hz", .label="SPI clock (Hz)", .group="W5500 wiring", .type=CF_INT,
                        .imin=1000000, .imax=20000000, .idef=20000000,
                        .help="20 MHz is the proven ceiling on GPIO-matrix pins. Reads corrupt silently above it.",
@@ -188,26 +211,26 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
   [CFG_GPS_UART]   = { .key="gps.uart", .label="UART port", .group="GPS wiring", .type=CF_INT,
                        .imin=0, .imax=2, .idef=2, .reboot=true, .advanced=true },
   [CFG_GPS_RX]     = { .key="gps.rx", .label="RX pin (GPS TX)", .group="GPS wiring", .type=CF_INT,
-                       .imin=-1, .imax=39, .idef=16, .help=PIN_HELP, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_IN_MAX, .idef=DEF_GPS_RX, .help=PIN_HELP, .reboot=true, .advanced=true },
   [CFG_GPS_TX]     = { .key="gps.tx", .label="TX pin", .group="GPS wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=17, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=DEF_GPS_TX, .reboot=true, .advanced=true },
   [CFG_GPS_BAUD]   = { .key="gps.baud", .label="Baud rate", .group="GPS wiring", .type=CF_INT,
                        .imin=1200, .imax=921600, .idef=9600, .reboot=true, .advanced=true },
   [CFG_PPS_GPIO]   = { .key="pps.gpio", .label="PPS pin", .group="GPS wiring", .type=CF_INT,
-                       .imin=-1, .imax=39, .idef=19,
+                       .imin=-1, .imax=PIN_IN_MAX, .idef=DEF_PPS_GPIO,
                        .help="Hardware-captured by MCPWM. The whole clock rides on this.",
                        .reboot=true, .advanced=true },
   [CFG_PPS_CAL]    = { .key="pps.cal", .label="PPS calibration (us)", .group="GPS wiring", .type=CF_INT,
                        .imin=-1000000, .imax=1000000, .idef=0, .advanced=true },
 
   [CFG_RTC_SDA]    = { .key="rtc.sda", .label="SDA pin", .group="DS3231 wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=-1,
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=-1,
                        .help="-1 = no DS3231 fitted. With one: battery-backed time at boot.",
                        .reboot=true, .advanced=true },
   [CFG_RTC_SCL]    = { .key="rtc.scl", .label="SCL pin", .group="DS3231 wiring", .type=CF_INT,
-                       .imin=-1, .imax=33, .idef=-1, .help=PIN_HELP, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=-1, .help=PIN_HELP, .reboot=true, .advanced=true },
   [CFG_RTC_32K]    = { .key="rtc.32k", .label="32kHz pin", .group="DS3231 wiring", .type=CF_INT,
-                       .imin=-1, .imax=39, .idef=-1,
+                       .imin=-1, .imax=PIN_IN_MAX, .idef=-1,
                        .help="TCXO output, captured as the holdover frequency reference. -1 = not wired.",
                        .reboot=true, .advanced=true },
 };
