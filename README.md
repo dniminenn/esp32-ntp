@@ -24,7 +24,7 @@ deployed clock needs no rebuild and no serial cable. See [Configuration](#config
 - **Prometheus metrics** at `GET /metrics`.
 - **Self-healing:** task watchdog reboots on a hang, and a W5500 health check restarts the
   device if the network chip wedges.
-- **Optional MAX7219 LED display.**
+- **Optional display:** MAX7219 LED matrices on SPI, or an SSD1306 OLED on I2C.
 
 ## Accuracy
 
@@ -116,7 +116,11 @@ almost always one of those rather than the ESP32.
   peripheral.
 - **Ethernet (recommended):** WIZnet W5500 on its own SPI bus (HSPI / SPI2 by default, 20 MHz). Its
   `INTn` pin is wired to a GPIO (default GPIO34) for hardware RX timestamping.
-- **Display (optional):** up to 4x MAX7219 8x8 matrices on a separate SPI bus (VSPI / SPI3).
+- **Display (optional):** either up to 4x MAX7219 8x8 matrices on a separate SPI bus (VSPI / SPI3),
+  or a 128x64 or 128x32 SSD1306 OLED on I2C at 0x3C, which can share the DS3231's two wires. Both
+  show the same three things: the time, the centisecond bit row along the top, and the presync
+  marker until the GPS locks. The OLED path is written to the SSD1306 datasheet and compiles for
+  both targets, but no OLED has been on the bench yet.
 - **DS3231 RTC (optional):** any DS3231 breakout on I2C (any two GPIOs), 3.3 V, with its coin
   cell fitted. It does two independent jobs. The battery-backed time seeds the system clock at
   boot (display and logs are right immediately; NTP still waits for GPS) and is written back
@@ -148,6 +152,7 @@ Street prices for the clone-grade parts most people actually buy (AliExpress / H
 | Jumper wires / small perfboard | wiring | $2 |
 | 5V USB supply | power (you probably already own one) | $0 to $3 |
 | MAX7219 4-in-1 8x8 matrix (optional) | LED display | $6 |
+| SSD1306 0.96" I2C OLED (optional, instead of the matrix) | OLED display | $3 |
 | DS3231 breakout + coin cell (optional) | battery-backed boot time, TCXO holdover reference | $2 |
 
 The MCU row means the original ESP32 specifically. See **Hardware** above for which parts in the
@@ -292,6 +297,7 @@ Every runtime setting, generated from the single table in
 |---|---|---|---|---|
 | `disp.en` | bool | 0 / 1 | R | Enable display |
 | `disp.glyph` | bool | 0 / 1 |  | Show presync glyph. Marker shown until the GPS locks. |
+| `disp.type` | enum | `max7219` / `ssd1306` | R | Display type. MAX7219 matrices on SPI, or an SSD1306 OLED on I2C. |
 
 #### Service
 
@@ -313,6 +319,11 @@ defaults are the S3 set listed under the MCU requirements above.
 | `disp.sclk` | int | `-1`..`33` | R A | SCLK pin |
 | `disp.hz` | int | `100000`..`20000000` | R A | SPI clock (Hz) |
 | `disp.ndev` | int | `1`..`16` | R A | Cascaded modules |
+| `disp.sda` | int | `-1`..`33` | R A | OLED SDA pin. SSD1306 only. Same pins as the DS3231 puts both on one bus. |
+| `disp.scl` | int | `-1`..`33` | R A | OLED SCL pin |
+| `disp.addr` | int | `60`..`61` | R A | OLED I2C address. 60 = 0x3C on nearly every module, 61 = 0x3D. |
+| `disp.size` | enum | `128x32` / `128x64` | R A | OLED size |
+| `disp.flip` | bool | 0 / 1 | R A | OLED rotate 180 |
 
 #### W5500 wiring
 
