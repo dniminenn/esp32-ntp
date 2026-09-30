@@ -14,9 +14,9 @@ static const uint8_t kFont[11][5] = {
 };
 static const int kTimeoutMs = 50;
 
-Ssd1306Display::Ssd1306Display(int sda, int scl, uint8_t a, int r, bool f)
+Ssd1306Display::Ssd1306Display(int sda, int scl, uint8_t a, int r, bool f, bool sh)
   : sdaPin(sda), sclPin(scl), rows(r == 32 ? 32 : 64), pages(rows / 8), scale(rows / 8 > 4 ? 3 : 2),
-    addr(a), flip(f) {
+    addr(a), flip(f), sh1106(sh) {
   memset(fb, 0, sizeof(fb));
 }
 
@@ -47,7 +47,7 @@ esp_err_t Ssd1306Display::begin() {
     0xA8, (uint8_t)(rows - 1),
     0xD3, 0x00,
     0x40,
-    0x8D, 0x14,
+    (uint8_t)(sh1106 ? 0xAD : 0x8D), (uint8_t)(sh1106 ? 0x8B : 0x14),
     0x20, 0x00,
     (uint8_t)(flip ? 0xA0 : 0xA1),
     (uint8_t)(flip ? 0xC0 : 0xC8),
@@ -60,9 +60,12 @@ esp_err_t Ssd1306Display::begin() {
     0x2E,
   };
   for (size_t i = 0; i < sizeof(init); ) {
+    // SH1106 has page addressing only and no SSD1306 scroll commands.
+    if (sh1106 && init[i] == 0x20) { i += 2; continue; }
+    if (sh1106 && init[i] == 0x2E) { ++i; continue; }
     size_t n = 1;
     if (init[i] == 0xD5 || init[i] == 0xA8 || init[i] == 0xD3 || init[i] == 0x8D || init[i] == 0x20 ||
-        init[i] == 0xDA || init[i] == 0x81 || init[i] == 0xD9 || init[i] == 0xDB) n = 2;
+        init[i] == 0xDA || init[i] == 0x81 || init[i] == 0xD9 || init[i] == 0xDB || init[i] == 0xAD) n = 2;
     if ((err = cmd(init + i, n)) != ESP_OK) return err;
     i += n;
   }
@@ -134,8 +137,14 @@ void Ssd1306Display::push() {
   for (int page = 0; page < pages; ++page) {
     const uint8_t* src = fb + page * kWidth;
     if (sentValid && memcmp(src, sent + page * kWidth, kWidth) == 0) continue;
-    const uint8_t win[] = { 0x21, 0x00, (uint8_t)(kWidth - 1), 0x22, (uint8_t)page, (uint8_t)page };
-    if (cmd(win, 3) != ESP_OK || cmd(win + 3, 3) != ESP_OK) return;
+    if (sh1106) {
+      // Typical 128-column panels occupy columns 2..129 of the 132-column RAM.
+      const uint8_t win[] = { (uint8_t)(0xB0 | page), 0x02, 0x10 };
+      if (cmd(win, sizeof(win)) != ESP_OK) return;
+    } else {
+      const uint8_t win[] = { 0x21, 0x00, (uint8_t)(kWidth - 1), 0x22, (uint8_t)page, (uint8_t)page };
+      if (cmd(win, 3) != ESP_OK || cmd(win + 3, 3) != ESP_OK) return;
+    }
     buf[0] = 0x40;
     memcpy(buf + 1, src, kWidth);
     if (i2c_master_transmit(dev, buf, sizeof(buf), kTimeoutMs) != ESP_OK) return;

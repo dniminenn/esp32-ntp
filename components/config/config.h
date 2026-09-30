@@ -22,7 +22,7 @@ int getSpiClockHz();
 int getSpiMosiPin();
 int getSpiMisoPin();
 int getSpiSclkPin();
-// SSD1306 OLED (disp.type = 1)
+// I2C OLED (disp.type = 1: SSD1306, 2: SH1106)
 int getDisplayType();
 int getDisplaySdaPin();
 int getDisplaySclPin();
