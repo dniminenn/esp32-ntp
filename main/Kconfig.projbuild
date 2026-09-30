@@ -124,5 +124,37 @@ config APP_SPI_CLOCK_HZ
     range 100000 26000000
     default 10000000
 
-endmenu
+comment "DS3231 RTC"
 
+config APP_RTC_SDA_PIN
+    int "DS3231 SDA GPIO (-1 = disabled)"
+    range -1 48 if IDF_TARGET_ESP32S3
+    range -1 33 if !IDF_TARGET_ESP32S3
+    default -1
+    help
+        I2C SDA pin for the optional DS3231 battery-backed clock.
+        Configure both SDA and SCL to enable the RTC. The SSD1306 display
+        can share the same I2C pins. Use an output-capable GPIO.
+
+config APP_RTC_SCL_PIN
+    int "DS3231 SCL GPIO (-1 = disabled)"
+    range -1 48 if IDF_TARGET_ESP32S3
+    range -1 33 if !IDF_TARGET_ESP32S3
+    default -1
+    help
+        I2C SCL pin for the optional DS3231. Use an output-capable GPIO.
+        On ESP32-S3, GPIO22-25 do not exist; avoid pins used by flash,
+        PSRAM, USB, or other peripherals for both SDA and SCL.
+
+config APP_RTC_32K_PIN
+    int "DS3231 32kHz GPIO (-1 = not wired)"
+    range -1 48 if IDF_TARGET_ESP32S3
+    range -1 39 if !IDF_TARGET_ESP32S3
+    default -1
+    help
+        Optional input from the DS3231 32K output for the TCXO holdover
+        frequency reference. Connect the 32K pad, not INT/SQW, and provide
+        a pull-up to 3.3 V. Leave at -1 for battery-backed time only.
+        Avoid GPIOs already used by other peripherals.
+
+endmenu

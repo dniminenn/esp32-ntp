@@ -243,13 +243,13 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .imin=-1000000, .imax=1000000, .idef=0, .advanced=true },
 
   [CFG_RTC_SDA]    = { .key="rtc.sda", .label="SDA pin", .group="DS3231 wiring", .type=CF_INT,
-                       .imin=-1, .imax=PIN_OUT_MAX, .idef=-1,
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=CONFIG_APP_RTC_SDA_PIN,
                        .help="-1 = no DS3231 fitted. With one: battery-backed time at boot.",
                        .reboot=true, .advanced=true },
   [CFG_RTC_SCL]    = { .key="rtc.scl", .label="SCL pin", .group="DS3231 wiring", .type=CF_INT,
-                       .imin=-1, .imax=PIN_OUT_MAX, .idef=-1, .help=PIN_HELP, .reboot=true, .advanced=true },
+                       .imin=-1, .imax=PIN_OUT_MAX, .idef=CONFIG_APP_RTC_SCL_PIN, .help=PIN_HELP, .reboot=true, .advanced=true },
   [CFG_RTC_32K]    = { .key="rtc.32k", .label="32kHz pin", .group="DS3231 wiring", .type=CF_INT,
-                       .imin=-1, .imax=PIN_IN_MAX, .idef=-1,
+                       .imin=-1, .imax=PIN_IN_MAX, .idef=CONFIG_APP_RTC_32K_PIN,
                        .help="TCXO output, captured as the holdover frequency reference. -1 = not wired.",
                        .reboot=true, .advanced=true },
 };

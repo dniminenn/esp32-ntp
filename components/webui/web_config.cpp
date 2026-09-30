@@ -62,7 +62,7 @@ static void html_escape(const char* in, char* out, size_t cap) {
 
 static const char* const kGroupOrder[] = {
   "Network", "System", "Display", "Service",
-  "Display wiring", "W5500 wiring", "GPS wiring", nullptr
+  "Display wiring", "W5500 wiring", "GPS wiring", "DS3231 wiring", nullptr
 };
 
 void WebServer::renderField(char** pp, char* end, int i) {
@@ -337,4 +337,3 @@ void WebServer::handleConfigPost(char* body) {
   vTaskDelay(pdMS_TO_TICKS(300));
   esp_restart();
 }
-
