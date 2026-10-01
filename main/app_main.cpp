@@ -2,6 +2,7 @@
 // main/app_main.cpp
 
 #include <string.h>
+#include <inttypes.h>
 #include <sys/time.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
@@ -315,7 +316,7 @@ void app_main() {
   // Set a reasonable initial time to avoid massive NTP corrections
   struct timeval tv;
   gettimeofday(&tv, nullptr);
-  ESP_LOGI(TAG, "Initial system time: %ld seconds (epoch: %ld)", tv.tv_sec, tv.tv_sec);
+  ESP_LOGI(TAG, "Initial system time: %" PRId64 " seconds", (int64_t)tv.tv_sec);
   
   if (tv.tv_sec < 1577836800LL) {  // Before 2020-01-01
     tv.tv_sec = 1700000000LL;  // Set to 2023-11-15 as reasonable default
@@ -325,9 +326,9 @@ void app_main() {
     
     // Verify the change
     gettimeofday(&tv, nullptr);
-    ESP_LOGI(TAG, "New system time: %ld seconds", tv.tv_sec);
+    ESP_LOGI(TAG, "New system time: %" PRId64 " seconds", (int64_t)tv.tv_sec);
   } else {
-    ESP_LOGI(TAG, "System time already reasonable: %ld seconds", tv.tv_sec);
+    ESP_LOGI(TAG, "System time already reasonable: %" PRId64 " seconds", (int64_t)tv.tv_sec);
   }
   
   // Initialize networking infrastructure first

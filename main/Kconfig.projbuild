@@ -125,4 +125,3 @@ config APP_SPI_CLOCK_HZ
     default 10000000
 
 endmenu
-
