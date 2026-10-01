@@ -202,6 +202,10 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .reboot=true, .advanced=true },
   [CFG_DISP_SIZE]  = { .key="disp.size", .label="OLED size", .group="Display wiring", .type=CF_ENUM,
                        .imin=0, .imax=1, .idef=1, .names=kDispSizes, .reboot=true, .advanced=true },
+  [CFG_DISP_OFFSET]= { .key="disp.offset", .label="SH1106 column offset", .group="Display wiring", .type=CF_INT,
+                       .imin=0, .imax=4, .idef=2,
+                       .help="SH1106 only. Starting RAM column with rotation off; depends on panel wiring. Rotation adjusts it automatically.",
+                       .reboot=true, .advanced=true },
   [CFG_DISP_FLIP]  = { .key="disp.flip", .label="OLED rotate 180", .group="Display wiring", .type=CF_BOOL,
                        .imin=0, .imax=1, .idef=0, .reboot=true, .advanced=true },
 

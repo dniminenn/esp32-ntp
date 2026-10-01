@@ -56,6 +56,7 @@ typedef enum {
   CFG_RTC_SDA,
   CFG_RTC_SCL,
   CFG_RTC_32K,
+  CFG_DISP_OFFSET,
   CFG_COUNT
 } cfg_id_t;
 

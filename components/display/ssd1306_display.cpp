@@ -14,9 +14,9 @@ static const uint8_t kFont[11][5] = {
 };
 static const int kTimeoutMs = 50;
 
-Ssd1306Display::Ssd1306Display(int sda, int scl, uint8_t a, int r, bool f, bool sh)
+Ssd1306Display::Ssd1306Display(int sda, int scl, uint8_t a, int r, bool f, bool sh, int offset)
   : sdaPin(sda), sclPin(scl), rows(r == 32 ? 32 : 64), pages(rows / 8), scale(rows / 8 > 4 ? 3 : 2),
-    addr(a), flip(f), sh1106(sh) {
+    addr(a), flip(f), sh1106(sh), columnOffset(offset) {
   memset(fb, 0, sizeof(fb));
 }
 
@@ -29,6 +29,7 @@ esp_err_t Ssd1306Display::cmd(const uint8_t* bytes, size_t n) {
 }
 
 esp_err_t Ssd1306Display::begin() {
+  if (sh1106 && (columnOffset < 0 || columnOffset > 132 - kWidth)) return ESP_ERR_INVALID_ARG;
   i2c_master_bus_handle_t bus;
   esp_err_t err = i2c_bus_get(sdaPin, sclPin, &bus);
   if (err != ESP_OK) return err;
@@ -138,8 +139,11 @@ void Ssd1306Display::push() {
     const uint8_t* src = fb + page * kWidth;
     if (sentValid && memcmp(src, sent + page * kWidth, kWidth) == 0) continue;
     if (sh1106) {
-      // Typical 128-column panels occupy columns 2..129 of the 132-column RAM.
-      const uint8_t win[] = { (uint8_t)(0xB0 | page), 0x02, 0x10 };
+      // The panel bonding determines the visible window in the 132-column RAM.
+      // Reversing segment remapping mirrors that window when rotated.
+      const int start = flip ? 132 - kWidth - columnOffset : columnOffset;
+      const uint8_t win[] = { (uint8_t)(0xB0 | page),
+                              (uint8_t)(start & 0x0F), (uint8_t)(0x10 | (start >> 4)) };
       if (cmd(win, sizeof(win)) != ESP_OK) return;
     } else {
       const uint8_t win[] = { 0x21, 0x00, (uint8_t)(kWidth - 1), 0x22, (uint8_t)page, (uint8_t)page };

@@ -311,8 +311,10 @@ Every runtime setting, generated from the single table in
 
 For a 128x64 SH1106 OLED, select `sh1106` as the display type, enable the display,
 set `disp.size` to `128x64`, and configure its SDA/SCL pins and I2C address. Save
-and reboot. SH1106 uses page addressing with a two-column panel offset; selecting
-SSD1306 for it can produce garbled output.
+and reboot. SH1106 uses page addressing. Set `disp.offset` to the panel's starting
+RAM column with rotation off (0..4, default 2); the correct value depends on the
+panel wiring, not just the controller. Rotation automatically mirrors this offset.
+Selecting SSD1306 for an SH1106 can produce garbled output.
 
 #### Service
 
@@ -338,6 +340,7 @@ defaults are the S3 set listed under the MCU requirements above.
 | `disp.scl` | int | `-1`..`33` | R A | OLED SCL pin |
 | `disp.addr` | int | `60`..`61` | R A | OLED I2C address. 60 = 0x3C on nearly every module, 61 = 0x3D. |
 | `disp.size` | enum | `128x32` / `128x64` | R A | OLED size |
+| `disp.offset` | int | `0`..`4` | R A | SH1106 starting RAM column with rotation off. Default 2; set for the panel wiring. Ignored for SSD1306. |
 | `disp.flip` | bool | 0 / 1 | R A | OLED rotate 180 |
 
 #### W5500 wiring

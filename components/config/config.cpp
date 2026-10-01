@@ -28,6 +28,7 @@ int getDisplaySdaPin() { return cfg_int(CFG_DISP_SDA); }
 int getDisplaySclPin() { return cfg_int(CFG_DISP_SCL); }
 int getDisplayI2cAddr() { return cfg_int(CFG_DISP_ADDR); }
 int getDisplayRows() { return cfg_int(CFG_DISP_SIZE) ? 64 : 32; }
+int getDisplayColumnOffset() { return cfg_int(CFG_DISP_OFFSET); }
 bool getDisplayFlip() { return cfg_int(CFG_DISP_FLIP) != 0; }
 
 const char* getTimezone() { return cfg_str(CFG_SYS_TZ); }
