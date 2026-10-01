@@ -393,16 +393,6 @@ Project options live under **`esp32-ntp configuration`** in `menuconfig`:
 - **SPI / Display**
   - `APP_USE_DISPLAY` and the MAX7219 SPI host/pinout (`APP_SPI_HOST`, `APP_SPI_MOSI_PIN`,
     `APP_SPI_SCLK_PIN`, `APP_CS_PIN`, `APP_MAX_DEVICES`, `APP_SPI_CLOCK_HZ`).
-- **DS3231 RTC**
-  - `APP_RTC_SDA_PIN` and `APP_RTC_SCL_PIN`: set both to the GPIOs wired to the
-    DS3231's SDA and SCL. Both default to `-1` (disabled).
-  - `APP_RTC_32K_PIN`: optional GPIO wired to the **32K** output with a pull-up to
-    3.3 V, for TCXO holdover. Leave at `-1` if only using battery-backed time.
-  - Wire VCC to 3.3 V and GND to ground. Select unused GPIOs; SDA and SCL must
-    support output. The OLED can share the same I2C bus.
-  - These are defaults for `rtc.sda`, `rtc.scl`, and `rtc.32k`. Previously saved
-    NVS settings override them; update the **DS3231 wiring** fields in the web
-    settings page (advanced settings) and reboot if settings were already saved.
 
 The full set of runtime settings, their valid ranges and their build-time defaults are declared in
 one table in `components/config/config_store.c`; adding a setting means adding a row there, and the
