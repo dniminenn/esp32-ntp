@@ -195,7 +195,10 @@ void WebServer::sendConfigPage(const char* notice) {
   uint32_t ipv = 0;
   if (eth) eth->getIpAddr(ipv);
 #if CONFIG_SOC_WIFI_SUPPORTED
-  else if (wifi) wifi->getIpAddr(ipv);
+  else if (wifi) {
+    wifi->getIpAddr(ipv);
+    ipv = ntohl(ipv);
+  }
 #endif
   uint8_t mac[6] = {0};
   if (eth) eth->getMacAddr(mac);

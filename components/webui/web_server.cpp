@@ -101,7 +101,12 @@ bool WebServer::tryStartListener() {
       return false;
     }
     int flags = fcntl(listen_sock, F_GETFL, 0);
-    if (flags >= 0) fcntl(listen_sock, F_SETFL, flags | O_NONBLOCK);
+    if (flags < 0 || fcntl(listen_sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+      close(listen_sock);
+      listen_sock = -1;
+      return false;
+    }
+    ipVal = ntohl(ipVal);
     ESP_LOGI(TAG, "Stats HTTP server listening on %lu.%lu.%lu.%lu:%d (WiFi)",
              (ipVal >> 24) & 0xff, (ipVal >> 16) & 0xff, (ipVal >> 8) & 0xff, ipVal & 0xff, port);
     startupLogged = true;
@@ -144,7 +149,16 @@ void WebServer::loop() {
       struct sockaddr_in from = {};
       socklen_t fromlen = sizeof(from);
       client_sock = accept(listen_sock, (struct sockaddr*)&from, &fromlen);
-      if (client_sock >= 0) resetRequest();
+      if (client_sock >= 0) {
+        // Accepted sockets do not inherit O_NONBLOCK. Otherwise pumpRequest()
+        // waits for more data after the HTTP request and starves the watchdog.
+        int flags = fcntl(client_sock, F_GETFL, 0);
+        if (flags < 0 || fcntl(client_sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+          closeConn();
+          return;
+        }
+        resetRequest();
+      }
       return;
     }
     handleConnection();
@@ -199,6 +213,7 @@ void WebServer::loop() {
 
 void WebServer::resetRequest() {
   reqLen = 0;
+  g_req[0] = '\0';
   hdrEnd = -1;
   contentLen = 0;
   reqStartUs = 0;

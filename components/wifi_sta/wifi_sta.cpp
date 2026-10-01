@@ -28,9 +28,10 @@ static void on_ip_event(void* arg, esp_event_base_t base, int32_t id, void* data
 void WifiSta::onGotIp(uint32_t ip) {
   cached_ip = ip;
   ip_valid = true;
+  uint32_t display_ip = ntohl(ip);
   ESP_LOGI(TAG, "Got IP: %lu.%lu.%lu.%lu",
-           (cached_ip >> 24) & 0xff, (cached_ip >> 16) & 0xff,
-           (cached_ip >> 8) & 0xff, (cached_ip >> 0) & 0xff);
+           (display_ip >> 24) & 0xff, (display_ip >> 16) & 0xff,
+           (display_ip >> 8) & 0xff, display_ip & 0xff);
 }
 
 WifiSta::WifiSta() : started(false), cached_ip(0), ip_valid(false) {}
