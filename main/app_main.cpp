@@ -397,7 +397,7 @@ void app_main() {
       g_display = new Ssd1306Display(Config::getDisplaySdaPin(), Config::getDisplaySclPin(),
                                      (uint8_t)Config::getDisplayI2cAddr(), Config::getDisplayRows(),
                                      Config::getDisplayFlip(), Config::getDisplayType() == 2,
-                                     Config::getDisplayColumnOffset());
+                                     Config::getDisplayColumnOffset(), Config::getDisplaySegmentRemap());
     else
       g_display = new MatrixDisplay(Config::getSpiHost(), Config::getCsPin(), Config::getMaxDevices(), Config::getSpiClockHz());
     err = g_display->begin();

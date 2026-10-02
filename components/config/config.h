@@ -29,6 +29,7 @@ int getDisplaySclPin();
 int getDisplayI2cAddr();
 int getDisplayRows();
 bool getDisplayFlip();
+bool getDisplaySegmentRemap();
 int getDisplayColumnOffset();
 
 const char* getTimezone();

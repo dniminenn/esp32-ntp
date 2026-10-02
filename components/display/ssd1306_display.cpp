@@ -14,9 +14,9 @@ static const uint8_t kFont[11][5] = {
 };
 static const int kTimeoutMs = 50;
 
-Ssd1306Display::Ssd1306Display(int sda, int scl, uint8_t a, int r, bool f, bool sh, int offset)
+Ssd1306Display::Ssd1306Display(int sda, int scl, uint8_t a, int r, bool f, bool sh, int offset, bool remap)
   : sdaPin(sda), sclPin(scl), rows(r == 32 ? 32 : 64), pages(rows / 8), scale(rows / 8 > 4 ? 3 : 2),
-    addr(a), flip(f), sh1106(sh), columnOffset(offset) {
+    addr(a), flip(f), sh1106(sh), segmentRemap(remap), columnOffset(offset) {
   memset(fb, 0, sizeof(fb));
 }
 
@@ -50,7 +50,8 @@ esp_err_t Ssd1306Display::begin() {
     0x40,
     (uint8_t)(sh1106 ? 0xAD : 0x8D), (uint8_t)(sh1106 ? 0x8B : 0x14),
     0x20, 0x00,
-    (uint8_t)(flip ? 0xA0 : 0xA1),
+    // SH1106 segment remapping follows panel bonding; retain SSD1306 rotation.
+    (uint8_t)(sh1106 ? (segmentRemap ? 0xA1 : 0xA0) : (flip ? 0xA0 : 0xA1)),
     (uint8_t)(flip ? 0xC0 : 0xC8),
     0xDA, (uint8_t)(rows == 64 ? 0x12 : 0x02),
     0x81, 0x7F,
@@ -139,9 +140,8 @@ void Ssd1306Display::push() {
     const uint8_t* src = fb + page * kWidth;
     if (sentValid && memcmp(src, sent + page * kWidth, kWidth) == 0) continue;
     if (sh1106) {
-      // The panel bonding determines the visible window in the 132-column RAM.
-      // Reversing segment remapping mirrors that window when rotated.
-      const int start = flip ? 132 - kWidth - columnOffset : columnOffset;
+      // Explicit RAM column of the first pixel under the selected segment remap.
+      const int start = columnOffset;
       const uint8_t win[] = { (uint8_t)(0xB0 | page),
                               (uint8_t)(start & 0x0F), (uint8_t)(0x10 | (start >> 4)) };
       if (cmd(win, sizeof(win)) != ESP_OK) return;

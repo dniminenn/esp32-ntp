@@ -311,9 +311,15 @@ Every runtime setting, generated from the single table in
 
 For a 128x64 SH1106 OLED, select `sh1106` as the display type, enable the display,
 set `disp.size` to `128x64`, and configure its SDA/SCL pins and I2C address. Save
-and reboot. SH1106 uses page addressing. Set `disp.offset` to the panel's starting
-RAM column with rotation off (0..4, default 2); the correct value depends on the
-panel wiring, not just the controller. Rotation automatically mirrors this offset.
+and reboot. SH1106 uses page addressing. `disp.segremap` selects segment remapping:
+false sends `0xA0`, true sends `0xA1` (default). `disp.offset` is the SH1106 RAM
+column corresponding to the first visible framebuffer pixel under the selected
+segment remapping (0..4, default 2), so the 128-pixel window fits in its 132-column
+RAM. Both settings may depend on the physical bonding/wiring of the particular
+SH1106 OLED module. `disp.flip` controls COM scan direction independently and
+does not transform the offset or select SH1106 segment remapping. On SSD1306,
+`disp.flip` retains the existing 180-degree orientation behavior; `disp.segremap`
+and `disp.offset` are ignored. All three settings require a reboot.
 Selecting SSD1306 for an SH1106 can produce garbled output.
 
 #### Service
@@ -340,8 +346,9 @@ defaults are the S3 set listed under the MCU requirements above.
 | `disp.scl` | int | `-1`..`33` | R A | OLED SCL pin |
 | `disp.addr` | int | `60`..`61` | R A | OLED I2C address. 60 = 0x3C on nearly every module, 61 = 0x3D. |
 | `disp.size` | enum | `128x32` / `128x64` | R A | OLED size |
-| `disp.offset` | int | `0`..`4` | R A | SH1106 starting RAM column with rotation off. Default 2; set for the panel wiring. Ignored for SSD1306. |
-| `disp.flip` | bool | 0 / 1 | R A | OLED rotate 180 |
+| `disp.offset` | int | `0`..`4` | R A | SH1106 RAM column of the first visible framebuffer pixel under the selected segment remapping. Default 2; depends on panel bonding/wiring. Independent of `disp.flip`; ignored for SSD1306. |
+| `disp.segremap` | bool | 0 / 1 | R A | SH1106 segment remapping: 0 = `0xA0`, 1 = `0xA1` (default). Depends on panel bonding/wiring; ignored for SSD1306. |
+| `disp.flip` | bool | 0 / 1 | R A | OLED COM scan direction; 180-degree orientation on SSD1306. SH1106 segment remapping is controlled separately by `disp.segremap`. |
 
 #### W5500 wiring
 
