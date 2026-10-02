@@ -3,10 +3,10 @@
 #include "display.h"
 #include "driver/i2c_master.h"
 
-/* SSD1306 over I2C, 128x32 or 128x64. Same three drawings as the matrix, scaled to fit. */
+/* SSD1306 / SH1106 over I2C, 128x32 or 128x64. Same three drawings as the matrix, scaled to fit. */
 class Ssd1306Display : public Display {
 public:
-  Ssd1306Display(int sdaPin, int sclPin, uint8_t addr, int rows, bool flip);
+  Ssd1306Display(int sdaPin, int sclPin, uint8_t addr, int rows, bool flip, bool sh1106 = false, int columnOffset = 2, bool segmentRemap = true);
   esp_err_t begin() override;
   void clear() override;
   void setIntensity(uint8_t intensity) override;
@@ -20,6 +20,9 @@ private:
   int sdaPin, sclPin, rows, pages, scale;
   uint8_t addr;
   bool flip;
+  bool sh1106;
+  bool segmentRemap;
+  int columnOffset;
   i2c_master_dev_handle_t dev = nullptr;
   uint8_t fb[kWidth * 8];
   uint8_t sent[kWidth * 8];

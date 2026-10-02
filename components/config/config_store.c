@@ -77,7 +77,7 @@ static const char* NVS_NS = "ntpcfg";
 #define DEF_PPS_GPIO 19
 #endif
 
-static const char* const kDispTypes[] = { "max7219", "ssd1306" };
+static const char* const kDispTypes[] = { "max7219", "ssd1306", "sh1106" };
 static const char* const kDispSizes[] = { "128x32", "128x64" };
 
 #ifdef CONFIG_SOC_WIFI_SUPPORTED
@@ -160,8 +160,8 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .imin=0, .imax=1, .idef=CONFIG_APP_USE_PRESYNC_GLYPH,
                        .help="Marker shown until the GPS locks." },
   [CFG_DISP_TYPE]  = { .key="disp.type", .label="Display type", .group="Display", .type=CF_ENUM,
-                       .imin=0, .imax=1, .idef=0, .names=kDispTypes,
-                       .help="MAX7219 matrices on SPI, or an SSD1306 OLED on I2C.", .reboot=true },
+                       .imin=0, .imax=2, .idef=0, .names=kDispTypes,
+                       .help="MAX7219 matrices on SPI, or an SSD1306 / SH1106 OLED on I2C.", .reboot=true },
 
   [CFG_NTP_PORT]   = { .key="ntp.port", .label="NTP port", .group="Service", .type=CF_INT,
                        .imin=1, .imax=65535, .idef=CONFIG_APP_NTP_PORT,
@@ -193,7 +193,7 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .reboot=true, .advanced=true },
   [CFG_DISP_SDA]   = { .key="disp.sda", .label="OLED SDA pin", .group="Display wiring", .type=CF_INT,
                        .imin=-1, .imax=PIN_OUT_MAX, .idef=-1,
-                       .help="SSD1306 only. Same pins as the DS3231 puts both on one bus.",
+                       .help="I2C OLED only. Same pins as the DS3231 puts both on one bus.",
                        .reboot=true, .advanced=true },
   [CFG_DISP_SCL]   = { .key="disp.scl", .label="OLED SCL pin", .group="Display wiring", .type=CF_INT,
                        .imin=-1, .imax=PIN_OUT_MAX, .idef=-1, .reboot=true, .advanced=true },
@@ -202,8 +202,18 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .reboot=true, .advanced=true },
   [CFG_DISP_SIZE]  = { .key="disp.size", .label="OLED size", .group="Display wiring", .type=CF_ENUM,
                        .imin=0, .imax=1, .idef=1, .names=kDispSizes, .reboot=true, .advanced=true },
+  [CFG_DISP_OFFSET]= { .key="disp.offset", .label="SH1106 column offset", .group="Display wiring", .type=CF_INT,
+                       .imin=0, .imax=4, .idef=2,
+                       .help="SH1106 only. RAM column of the first visible framebuffer pixel under disp.segremap; depends on panel bonding/wiring. Independent of disp.flip.",
+                       .reboot=true, .advanced=true },
+  [CFG_DISP_SEGREMAP]= { .key="disp.segremap", .label="SH1106 segment remap", .group="Display wiring", .type=CF_BOOL,
+                       .imin=0, .imax=1, .idef=1,
+                       .help="SH1106 only. 0 sends A0, 1 sends A1 (default). Depends on panel bonding/wiring; independent of disp.flip.",
+                       .reboot=true, .advanced=true },
   [CFG_DISP_FLIP]  = { .key="disp.flip", .label="OLED rotate 180", .group="Display wiring", .type=CF_BOOL,
-                       .imin=0, .imax=1, .idef=0, .reboot=true, .advanced=true },
+                       .imin=0, .imax=1, .idef=0,
+                       .help="OLED COM scan direction; SSD1306 rotates 180 degrees. SH1106 segment remapping is set separately by disp.segremap.",
+                       .reboot=true, .advanced=true },
 
   [CFG_W5_HOST]    = { .key="w5.host", .label="SPI host", .group="W5500 wiring", .type=CF_INT,
                        .imin=1, .imax=2, .idef=SPI2_HOST,

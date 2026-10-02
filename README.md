@@ -24,7 +24,7 @@ deployed clock needs no rebuild and no serial cable. See [Configuration](#config
 - **Prometheus metrics** at `GET /metrics`.
 - **Self-healing:** task watchdog reboots on a hang, and a W5500 health check restarts the
   device if the network chip wedges.
-- **Optional display:** MAX7219 LED matrices on SPI, or an SSD1306 OLED on I2C.
+- **Optional display:** MAX7219 LED matrices on SPI, or an SSD1306 or SH1106 OLED on I2C.
 
 ## Accuracy
 
@@ -117,10 +117,10 @@ almost always one of those rather than the ESP32.
 - **Ethernet (recommended):** WIZnet W5500 on its own SPI bus (HSPI / SPI2 by default, 20 MHz). Its
   `INTn` pin is wired to a GPIO (default GPIO34) for hardware RX timestamping.
 - **Display (optional):** either up to 4x MAX7219 8x8 matrices on a separate SPI bus (VSPI / SPI3),
-  or a 128x64 or 128x32 SSD1306 OLED on I2C at 0x3C, which can share the DS3231's two wires. Both
+  or a 128x64 SH1106 or 128x64/128x32 SSD1306 OLED on I2C at 0x3C, which can share the DS3231's two wires. Both
   show the same three things: the time, the centisecond bit row along the top, and the presync
-  marker until the GPS locks. The OLED path is written to the SSD1306 datasheet and compiles for
-  both targets, but no OLED has been on the bench yet.
+  marker until the GPS locks. The OLED drivers use controller-specific initialization and addressing.
+  SH1106 support still needs verification on hardware.
 - **DS3231 RTC (optional):** any DS3231 breakout on I2C (any two GPIOs), 3.3 V, with its coin
   cell fitted. It does two independent jobs. The battery-backed time seeds the system clock at
   boot (display and logs are right immediately; NTP still waits for GPS) and is written back
@@ -307,7 +307,20 @@ Every runtime setting, generated from the single table in
 |---|---|---|---|---|
 | `disp.en` | bool | 0 / 1 | R | Enable display |
 | `disp.glyph` | bool | 0 / 1 |  | Show presync glyph. Marker shown until the GPS locks. |
-| `disp.type` | enum | `max7219` / `ssd1306` | R | Display type. MAX7219 matrices on SPI, or an SSD1306 OLED on I2C. |
+| `disp.type` | enum | `max7219` / `ssd1306` / `sh1106` | R | Display type. MAX7219 matrices on SPI, or an SSD1306 or SH1106 OLED on I2C. |
+
+For a 128x64 SH1106 OLED, select `sh1106` as the display type, enable the display,
+set `disp.size` to `128x64`, and configure its SDA/SCL pins and I2C address. Save
+and reboot. SH1106 uses page addressing. `disp.segremap` selects segment remapping:
+false sends `0xA0`, true sends `0xA1` (default). `disp.offset` is the SH1106 RAM
+column corresponding to the first visible framebuffer pixel under the selected
+segment remapping (0..4, default 2), so the 128-pixel window fits in its 132-column
+RAM. Both settings may depend on the physical bonding/wiring of the particular
+SH1106 OLED module. `disp.flip` controls COM scan direction independently and
+does not transform the offset or select SH1106 segment remapping. On SSD1306,
+`disp.flip` retains the existing 180-degree orientation behavior; `disp.segremap`
+and `disp.offset` are ignored. All three settings require a reboot.
+Selecting SSD1306 for an SH1106 can produce garbled output.
 
 #### Service
 
@@ -329,11 +342,13 @@ defaults are the S3 set listed under the MCU requirements above.
 | `disp.sclk` | int | `-1`..`33` | R A | SCLK pin |
 | `disp.hz` | int | `100000`..`20000000` | R A | SPI clock (Hz) |
 | `disp.ndev` | int | `1`..`16` | R A | Cascaded modules |
-| `disp.sda` | int | `-1`..`33` | R A | OLED SDA pin. SSD1306 only. Same pins as the DS3231 puts both on one bus. |
+| `disp.sda` | int | `-1`..`33` | R A | OLED SDA pin. SSD1306 / SH1106 only. Same pins as the DS3231 puts both on one bus. |
 | `disp.scl` | int | `-1`..`33` | R A | OLED SCL pin |
 | `disp.addr` | int | `60`..`61` | R A | OLED I2C address. 60 = 0x3C on nearly every module, 61 = 0x3D. |
 | `disp.size` | enum | `128x32` / `128x64` | R A | OLED size |
-| `disp.flip` | bool | 0 / 1 | R A | OLED rotate 180 |
+| `disp.offset` | int | `0`..`4` | R A | SH1106 RAM column of the first visible framebuffer pixel under the selected segment remapping. Default 2; depends on panel bonding/wiring. Independent of `disp.flip`; ignored for SSD1306. |
+| `disp.segremap` | bool | 0 / 1 | R A | SH1106 segment remapping: 0 = `0xA0`, 1 = `0xA1` (default). Depends on panel bonding/wiring; ignored for SSD1306. |
+| `disp.flip` | bool | 0 / 1 | R A | OLED COM scan direction; 180-degree orientation on SSD1306. SH1106 segment remapping is controlled separately by `disp.segremap`. |
 
 #### W5500 wiring
 

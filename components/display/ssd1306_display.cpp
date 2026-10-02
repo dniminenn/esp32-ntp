@@ -14,9 +14,9 @@ static const uint8_t kFont[11][5] = {
 };
 static const int kTimeoutMs = 50;
 
-Ssd1306Display::Ssd1306Display(int sda, int scl, uint8_t a, int r, bool f)
+Ssd1306Display::Ssd1306Display(int sda, int scl, uint8_t a, int r, bool f, bool sh, int offset, bool remap)
   : sdaPin(sda), sclPin(scl), rows(r == 32 ? 32 : 64), pages(rows / 8), scale(rows / 8 > 4 ? 3 : 2),
-    addr(a), flip(f) {
+    addr(a), flip(f), sh1106(sh), segmentRemap(remap), columnOffset(offset) {
   memset(fb, 0, sizeof(fb));
 }
 
@@ -29,6 +29,7 @@ esp_err_t Ssd1306Display::cmd(const uint8_t* bytes, size_t n) {
 }
 
 esp_err_t Ssd1306Display::begin() {
+  if (sh1106 && (columnOffset < 0 || columnOffset > 132 - kWidth)) return ESP_ERR_INVALID_ARG;
   i2c_master_bus_handle_t bus;
   esp_err_t err = i2c_bus_get(sdaPin, sclPin, &bus);
   if (err != ESP_OK) return err;
@@ -47,9 +48,10 @@ esp_err_t Ssd1306Display::begin() {
     0xA8, (uint8_t)(rows - 1),
     0xD3, 0x00,
     0x40,
-    0x8D, 0x14,
+    (uint8_t)(sh1106 ? 0xAD : 0x8D), (uint8_t)(sh1106 ? 0x8B : 0x14),
     0x20, 0x00,
-    (uint8_t)(flip ? 0xA0 : 0xA1),
+    // SH1106 segment remapping follows panel bonding; retain SSD1306 rotation.
+    (uint8_t)(sh1106 ? (segmentRemap ? 0xA1 : 0xA0) : (flip ? 0xA0 : 0xA1)),
     (uint8_t)(flip ? 0xC0 : 0xC8),
     0xDA, (uint8_t)(rows == 64 ? 0x12 : 0x02),
     0x81, 0x7F,
@@ -60,9 +62,12 @@ esp_err_t Ssd1306Display::begin() {
     0x2E,
   };
   for (size_t i = 0; i < sizeof(init); ) {
+    // SH1106 has page addressing only and no SSD1306 scroll commands.
+    if (sh1106 && init[i] == 0x20) { i += 2; continue; }
+    if (sh1106 && init[i] == 0x2E) { ++i; continue; }
     size_t n = 1;
     if (init[i] == 0xD5 || init[i] == 0xA8 || init[i] == 0xD3 || init[i] == 0x8D || init[i] == 0x20 ||
-        init[i] == 0xDA || init[i] == 0x81 || init[i] == 0xD9 || init[i] == 0xDB) n = 2;
+        init[i] == 0xDA || init[i] == 0x81 || init[i] == 0xD9 || init[i] == 0xDB || init[i] == 0xAD) n = 2;
     if ((err = cmd(init + i, n)) != ESP_OK) return err;
     i += n;
   }
@@ -134,8 +139,16 @@ void Ssd1306Display::push() {
   for (int page = 0; page < pages; ++page) {
     const uint8_t* src = fb + page * kWidth;
     if (sentValid && memcmp(src, sent + page * kWidth, kWidth) == 0) continue;
-    const uint8_t win[] = { 0x21, 0x00, (uint8_t)(kWidth - 1), 0x22, (uint8_t)page, (uint8_t)page };
-    if (cmd(win, 3) != ESP_OK || cmd(win + 3, 3) != ESP_OK) return;
+    if (sh1106) {
+      // Explicit RAM column of the first pixel under the selected segment remap.
+      const int start = columnOffset;
+      const uint8_t win[] = { (uint8_t)(0xB0 | page),
+                              (uint8_t)(start & 0x0F), (uint8_t)(0x10 | (start >> 4)) };
+      if (cmd(win, sizeof(win)) != ESP_OK) return;
+    } else {
+      const uint8_t win[] = { 0x21, 0x00, (uint8_t)(kWidth - 1), 0x22, (uint8_t)page, (uint8_t)page };
+      if (cmd(win, 3) != ESP_OK || cmd(win + 3, 3) != ESP_OK) return;
+    }
     buf[0] = 0x40;
     memcpy(buf + 1, src, kWidth);
     if (i2c_master_transmit(dev, buf, sizeof(buf), kTimeoutMs) != ESP_OK) return;
