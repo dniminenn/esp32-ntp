@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 #define CFG_STR_MAX 64
+#define CFG_NVS_NAMESPACE "ntpcfg"
 
 typedef enum {
   CFG_NET_MODE = 0,
@@ -89,6 +90,11 @@ bool cfg_provisioned(void);
 
 int32_t     cfg_int(cfg_id_t id);
 const char* cfg_str(cfg_id_t id);
+
+/* Export all effective settings, including defaults and plaintext passwords,
+ * in the ESP-IDF NVS partition generator's CSV format. No flash is written.
+ * out includes a trailing NUL; length excludes it and is zero on failure. */
+esp_err_t cfg_export_csv(char* out, size_t capacity, size_t* length);
 
 /* Look a field up by NVS key; CFG_COUNT when unknown. */
 cfg_id_t cfg_lookup(const char* key);

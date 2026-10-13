@@ -261,6 +261,41 @@ Set a password under **System** unless the network is fully trusted: without one
 reach the address can reconfigure or reboot the clock. `/metrics` stays unauthenticated either way
 so Prometheus can scrape it.
 
+### Exporting and restoring settings
+
+Click **Download configuration CSV** on the settings page, or request `GET /config.csv`, to
+download `settings.csv`. The export includes every current setting, including values supplied
+by build-time defaults, in the [ESP-IDF NVS partition generator's CSV format](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/storage/nvs_partition_gen.html).
+Numbers, booleans and enum indices are `i32`; text is `string`, under the `ntpcfg` namespace.
+Save form changes before downloading. In safe mode the export contains the build-time defaults
+being used for recovery, rather than the ignored settings in flash.
+
+The download uses the same management password and permanent lock as the settings page.
+It includes WiFi and management passwords in plaintext, so keep the file private.
+Boot counters, DHCP leases and learned clock calibration are not configuration settings and
+are omitted.
+
+To restore the exported settings over USB, use the existing provisioning command:
+
+```sh
+make nvs SETTINGS=settings.csv PORT=/dev/ttyACM0
+```
+
+This generates `build/settings.bin` and writes the NVS partition at the offset and size in
+`partitions.csv` (currently `0x9000` and `0x6000`). It replaces the entire NVS partition,
+including any saved leases, counters and learned calibration; it does not merge settings.
+Use a device with compatible wiring and firmware. To generate an image without flashing:
+
+```sh
+python -m esp_idf_nvs_partition_gen generate settings.csv settings.bin 0x6000
+```
+
+The generator is included in the ESP-IDF Python environment and is also available as
+[`esp-idf-nvs-partition-gen`](https://github.com/espressif/esp-idf-nvs-partition-gen).
+Its CSV reader normalizes carriage returns to line feeds and skips lines beginning with `#`,
+including continuation lines inside quoted text. Avoid those characters in multiline settings
+when using this generator; the CSV download itself preserves the original text.
+
 ### First boot without a network
 
 The wiring settings live behind the page, and the page is behind the W5500 those settings wire up.
@@ -275,11 +310,12 @@ defaults. Keys, types and ranges are the ones in the tables below.
 Once a clock is configured and in service, the settings page is pure attack surface. Two controls,
 in increasing severity:
 
-**Password.** Set one under **System**. It applies to the settings page and, when enabled, `/log`;
+**Password.** Set one under **System**. It applies to the settings page, CSV download and,
+when enabled, `/log`;
 `/metrics` stays open so Prometheus can scrape without credentials.
 
 **Lock settings permanently.** A fuse. Saving it removes the settings page, `GET /` and
-`/config` and `POST /config` all answer `403`, and so does `/factory-reset`, because a reset that
+`/config`, `/config.csv` and `POST /config` all answer `403`, and so does `/factory-reset`, because a reset that
 cleared the lock would not be a lock. What survives is NTP on port 123 and `/metrics`, which is
 everything a deployed clock actually needs.
 

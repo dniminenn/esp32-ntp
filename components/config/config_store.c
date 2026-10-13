@@ -12,7 +12,7 @@
 #include <stdlib.h>
 
 static const char* TAG = "CFGSTORE";
-static const char* NVS_NS = "ntpcfg";
+static const char* NVS_NS = CFG_NVS_NAMESPACE;
 
 /* Kconfig entries that only exist under one branch of the network choice. */
 #ifndef CONFIG_APP_USE_PRESYNC_GLYPH

@@ -44,6 +44,7 @@ private:
   void closeConn();
   void sendMetrics();
   void sendConfigPage(const char* notice);
+  void sendConfigCsv();
   void renderSection(char** pp, char* end, bool advanced);
   void renderField(char** pp, char* end, int i);
   void handleConfigPost(char* body);

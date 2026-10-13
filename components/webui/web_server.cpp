@@ -384,6 +384,7 @@ void WebServer::handleConnection() {
   }
 
   if (cfg_locked() && (pathIs("/") || pathIs("/config") ||
+                       pathIs("/config.csv") ||
                        pathIs("/factory-reset") || (weblog_active() && pathIs("/log")))) {
     sendStatus("403 Forbidden", "text/plain",
       "Settings are locked on this device. The lock is one way: erase the NVS "
@@ -402,6 +403,15 @@ void WebServer::handleConnection() {
     }
     weblog_snapshot(g_resp, 8192 + 1);
     sendStatus("200 OK", "text/plain; charset=utf-8", g_resp);
+    return;
+  }
+
+  if (isGet && pathIs("/config.csv")) {
+    if (!authorized(req)) {
+      sendStatus("401 Unauthorized", "text/plain", "Authentication required");
+      return;
+    }
+    sendConfigCsv();
     return;
   }
 
