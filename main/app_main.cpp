@@ -28,6 +28,7 @@
 #include "esp_task_wdt.h"
 #include "ntp_server.h"
 #include "web_server.h"
+#include "web_log.h"
 #include "w5500_eth.h"
 #include "wifi_sta.h"
 
@@ -275,6 +276,8 @@ void app_main() {
     ESP_LOGI(TAG, "Start attempt %u since the last start that reached the network",
              (unsigned)attempt);
     Config::init(safeMode);
+    if (cfg_int(CFG_WEB_LOG) && !weblog_install())
+      ESP_LOGW(TAG, "Web log disabled: could not allocate RAM ring buffer");
     if (safeMode) {
       ESP_LOGE(TAG, "SAFE MODE on start attempt %u: build-time defaults, "
                     "stored settings ignored until you save from the config page",

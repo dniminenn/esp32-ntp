@@ -243,8 +243,8 @@ defaults. Keys, types and ranges are the ones in the tables below.
 Once a clock is configured and in service, the settings page is pure attack surface. Two controls,
 in increasing severity:
 
-**Password.** Set one under **System**. It applies to the settings page only; `/metrics` stays open
-so Prometheus can scrape without credentials.
+**Password.** Set one under **System**. It applies to the settings page and, when enabled, `/log`;
+`/metrics` stays open so Prometheus can scrape without credentials.
 
 **Lock settings permanently.** A fuse. Saving it removes the settings page, `GET /` and
 `/config` and `POST /config` all answer `403`, and so does `/factory-reset`, because a reset that
@@ -297,9 +297,10 @@ Every runtime setting, generated from the single table in
 | Key | Type | Range | Flags | Setting |
 |---|---|---|---|---|
 | `sys.tz` | text |  |  | Timezone. Affects the LED display only. NTP always serves UTC. |
-| `stats.port` | int | `1`..`65535` | R | Management port. This page and /metrics. |
+| `stats.port` | int | `1`..`65535` | R | Management port. This page, /metrics, and /log when enabled. |
 | `ui.pass` | password |  |  | Management password. Blank leaves this page open to anyone on the network. |
 | `ui.lock` | bool | 0 / 1 |  | Lock settings permanently. One way. Saving this removes the settings page for good; only erasing  |
+| `log.enable` | bool | 0 / 1 | R | Enable the `/log` page after restart. Off by default; uses 8 KB of RAM when enabled. |
 
 #### Display
 

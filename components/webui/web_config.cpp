@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 
 #include "web_internal.h"
+#include "web_log.h"
 #include "config.h"
 #include "config_store.h"
 #include "gps.h"
@@ -246,7 +247,9 @@ void WebServer::sendConfigPage(const char* notice) {
     "<form method=post action=/factory-reset "
     "onsubmit=\"return confirm('Erase all stored settings and reboot?')\">"
     "<button class=sec type=submit>Erase stored settings</button></form>"
-    "<p class=st><a href=/metrics>/metrics</a></p>");
+    "<p class=st><a href=/metrics>/metrics</a>");
+  if (weblog_active()) p += snprintf(p, end - p, " &middot; <a href=/log>/log</a>");
+  p += snprintf(p, end - p, "</p>");
 
   int blen = (int)(p - g_resp);
   if (blen >= (int)sizeof(g_resp) - 1) blen = (int)sizeof(g_resp) - 1;
