@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 
 #include "web_internal.h"
+#include "web_log.h"
 #include "config.h"
 #include "config_store.h"
 #include "gps.h"
@@ -243,10 +244,15 @@ void WebServer::sendConfigPage(const char* notice) {
   p += snprintf(p, end - p,
     "<div class=acts><button type=submit>Save to flash</button>"
     "<span class=st><span class=r>*</span> needs a restart</span></div></form>"
+    "<p><a href=/config.csv download=settings.csv>Download configuration CSV</a>"
+    "<br><span class=st>Includes current settings and passwords in plaintext. "
+    "Save changes before downloading.</span></p>"
     "<form method=post action=/factory-reset "
     "onsubmit=\"return confirm('Erase all stored settings and reboot?')\">"
     "<button class=sec type=submit>Erase stored settings</button></form>"
-    "<p class=st><a href=/metrics>/metrics</a></p>");
+    "<p class=st><a href=/metrics>/metrics</a>");
+  if (weblog_active()) p += snprintf(p, end - p, " &middot; <a href=/log>/log</a>");
+  p += snprintf(p, end - p, "</p>");
 
   int blen = (int)(p - g_resp);
   if (blen >= (int)sizeof(g_resp) - 1) blen = (int)sizeof(g_resp) - 1;
@@ -260,6 +266,25 @@ void WebServer::sendConfigPage(const char* notice) {
     "\r\n", blen);
   sendAll(hdr, hlen);
   sendAll(g_resp, blen);
+  closeConn();
+}
+
+void WebServer::sendConfigCsv() {
+  size_t length = 0;
+  if (cfg_export_csv(g_resp, sizeof(g_resp), &length) != ESP_OK) {
+    sendStatus("500 Internal Server Error", "text/plain", "Could not export configuration");
+    return;
+  }
+  char hdr[256];
+  int hlen = snprintf(hdr, sizeof(hdr),
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/csv; charset=utf-8\r\n"
+    "Content-Disposition: attachment; filename=\"settings.csv\"\r\n"
+    "Cache-Control: no-store\r\n"
+    "Connection: close\r\n"
+    "Content-Length: %u\r\n\r\n", (unsigned)length);
+  sendAll(hdr, hlen);
+  sendAll(g_resp, (int)length);
   closeConn();
 }
 

@@ -12,7 +12,7 @@
 #include <stdlib.h>
 
 static const char* TAG = "CFGSTORE";
-static const char* NVS_NS = "ntpcfg";
+static const char* NVS_NS = CFG_NVS_NAMESPACE;
 
 /* Kconfig entries that only exist under one branch of the network choice. */
 #ifndef CONFIG_APP_USE_PRESYNC_GLYPH
@@ -145,7 +145,7 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .help="Affects the LED display only. NTP always serves UTC." },
   [CFG_STATS_PORT] = { .key="stats.port", .label="Management port", .group="System", .type=CF_INT,
                        .imin=1, .imax=65535, .idef=8080,
-                       .help="This page and /metrics.", .reboot=true },
+                       .help="This page, /metrics, and /log when enabled.", .reboot=true },
   [CFG_UI_PASS]    = { .key="ui.pass", .label="Management password", .group="System", .type=CF_PASS,
                        .sdef="", .help="Blank leaves this page open to anyone on the network." },
   [CFG_UI_LOCK]    = { .key="ui.lock", .label="Lock settings permanently", .group="System", .type=CF_BOOL,
@@ -153,6 +153,10 @@ const cfg_field_t g_cfg_fields[CFG_COUNT] = {
                        .help="One way. Removes the settings page for good; only erasing NVS over "
                              "USB brings it back. Metrics keep working. Needs a password set "
                              "first, which only stops you doing this by accident." },
+  [CFG_WEB_LOG]    = { .key="log.enable", .label="Enable web log", .group="System", .type=CF_BOOL,
+                       .imin=0, .imax=1, .idef=0,
+                       .help="Mirrors serial logs to /log. Uses 8 KB of RAM when enabled.",
+                       .reboot=true },
 
   [CFG_DISP_EN]    = { .key="disp.en", .label="Enable display", .group="Display", .type=CF_BOOL,
                        .imin=0, .imax=1, .idef=DEF_DISP_EN, .reboot=true },
