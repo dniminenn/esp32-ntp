@@ -121,12 +121,14 @@ almost always one of those rather than the ESP32.
   show the same three things: the time, the centisecond bit row along the top, and the presync
   marker until the GPS locks. The OLED drivers use controller-specific initialization and addressing.
   SH1106 support still needs verification on hardware.
-- **DS3231 RTC (optional):** any DS3231 breakout on I2C (any two GPIOs), 3.3 V, with its coin
+- **DS3231 RTC (optional):** a crystal-based DS3231 breakout (see the variant note below) on
+  I2C (any two GPIOs), 3.3 V, with its coin
   cell fitted. It does two independent jobs. The battery-backed time seeds the system clock at
   boot (display and logs are right immediately; NTP still waits for GPS) and is written back
   from GPS at most daily, or when it has drifted. Wiring the board's **32K pad** to a third GPIO
-  is the interesting part: that pin carries the DS3231's ±2 ppm temperature-compensated
-  oscillator directly, and it lands on the last MCPWM capture channel, sharing the 80 MHz
+  is the interesting part: that pin carries the DS3231's temperature-compensated
+  oscillator (±2 ppm from 0 to 40 °C, ±3.5 ppm over -40 to 85 °C on the industrial part)
+  directly, and it lands on the last MCPWM capture channel, sharing the 80 MHz
   counter with PPS and `INTn`. The crystal is then measured against the TCXO continuously, so
   GPS holdover stops coasting on a frozen frequency estimate: the crystal's thermal drift is
   observed live, and the TCXO's own residual error is learned against GPS per 0.5 °C of its die
@@ -139,6 +141,36 @@ almost always one of those rather than the ESP32.
   pins default to `-1`.
 
 Default pins live in `components/config/config.cpp` and can be overridden in `menuconfig`.
+
+### DS3231 variants and module accuracy
+
+Check the chip marking and the supplier's part number before using a module's **32K pad**
+as the holdover reference. Many inexpensive modules on the market are labeled or advertised
+simply as "DS3231" but are actually fitted with a **DS3231M variant**, whose 32K output is
+unsuitable for this project's holdover reference. The board label or listing title alone
+does not establish which chip is fitted.
+
+The manufacturer lists these base ordering variants in the
+[DS3231 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/DS3231.pdf)
+and [DS3231M datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/DS3231M.pdf):
+
+| Part | Oscillator / package | Rated temperature range | Timekeeping accuracy | 32K holdover reference |
+| --- | --- | --- | --- | --- |
+| DS3231S | Crystal TCXO, 16-pin SO | 0 to 70 °C | ±2 ppm at 0 to 40 °C; ±3.5 ppm above 40 °C | Suitable within its rated range |
+| DS3231SN | Crystal TCXO, 16-pin SO | -40 to 85 °C | ±2 ppm at 0 to 40 °C; ±3.5 ppm outside that interval | Suitable; wider temperature range |
+| DS3231M+ | MEMS, 16-pin SO | -45 to 85 °C | ±5 ppm | Unsuitable |
+| DS3231MZ+ | MEMS, 8-pin SO | -45 to 85 °C | ±5 ppm | Unsuitable |
+| DS3231MZ/V+ | MEMS, automotive-qualified 8-pin SO | -45 to 85 °C | ±5 ppm | Unsuitable |
+
+**DS3231N can be the package marking of DS3231SN**; the missing `S` does not identify a
+less accurate variant. The DS3231 datasheet's revision history records removal of `S`
+from the top marking. Suffixes such as `#` or `+` indicate RoHS/lead-free package options;
+tape-and-reel ordering suffixes do not define another accuracy grade.
+
+For all the MEMS variants above, **the 32 kHz output is specified at ±2.5%, not ±5 ppm**:
+temperature correction applies to the final 1 Hz time base. They can provide battery-backed
+boot time, but their 32K output is unsuitable for the TCXO holdover and PPS flywheel described
+above. Leave `rtc.32k` at `-1` with these variants.
 
 ## Bill of materials
 
