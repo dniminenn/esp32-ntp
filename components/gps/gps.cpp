@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_idf_version.h"
 
 static const char* TAG = "GPS";
 
@@ -56,7 +57,18 @@ static const double  kFreqEwmaAlpha = 0.05;               // fit -> filtered fre
 static const double  kHoldoverDriftFloorPpmPerHour = 0.5; // never claim better than this
 
 /* DS3231 TCXO holdover constants. */
-static const uint32_t kTcxoPrescale = 256;   // real divisor calibrated at runtime
+static const uint32_t kTcxoPrescale = 256;   // input cycles per capture
+// The MCPWM register encodes a same-edge divisor of 2*N (N=0 bypasses it).
+// IDF 6.0.2/6.0.3 and 6.1.0 incorrectly write API prescale-1 to that register:
+// asking for 256 produces 2*255=510 cycles/event, not 256. Espressif fixed
+// this in f9398bd. On affected releases ask for 129 so the register gets 128;
+// with the fixed driver ask for 256, which it maps to the same register value.
+#if (ESP_IDF_VERSION_MAJOR == 6 && ESP_IDF_VERSION_MINOR == 0 && ESP_IDF_VERSION_PATCH <= 3) || \
+    (ESP_IDF_VERSION_MAJOR == 6 && ESP_IDF_VERSION_MINOR == 1 && ESP_IDF_VERSION_PATCH == 0)
+static const uint32_t kTcxoDriverPrescale = kTcxoPrescale / 2 + 1;
+#else
+static const uint32_t kTcxoDriverPrescale = kTcxoPrescale;
+#endif
 static const double   kTcxoHoldoverFloorPpm = 0.05;        // never claim better than this
 // dispersion ceiling governs (~55 h)
 static const int64_t  kHoldoverMaxTcxoUs = 72LL * 3600LL * 1000000LL;
@@ -322,7 +334,7 @@ esp_err_t GpsDiscipline::beginTcxoCapture(int gpio) {
   if (gpio < 0 || capTimer == nullptr) return ESP_ERR_INVALID_ARG;
   mcpwm_capture_channel_config_t cfg = {};
   cfg.gpio_num = gpio;
-  cfg.prescale = kTcxoPrescale;
+  cfg.prescale = kTcxoDriverPrescale;
   // falling edge; rising ramps slowly
   cfg.flags.pos_edge = 0;
   cfg.flags.neg_edge = 1;
@@ -477,19 +489,22 @@ void GpsDiscipline::tcxoUpdate() {
       tcxoHoldoverGood = false;
       return;
     }
-    // integer cycles per event
+    // Do not mistake a driver prescale mismatch or lost edges for a different
+    // valid divisor: the reference is only usable at the intended 256 cycles.
     if (tcxoCyclesPerEvent == 0) {
       if (dCnt < 128) return;
       double kf = (double)(tick - baseTick) / (double)dCnt * 32768.0 / 80000000.0;
-      double kr = floor(kf + 0.5);
-      if (kr < 1 || kr > 2048 || fabs(kf - kr) > 0.25) {
-        ESP_LOGW(TAG, "32kHz event spacing not an integer cycle count (%.3f) — wrong signal?", kf);
+      if (fabs(kf - (double)kTcxoPrescale) > 0.25) {
+        ESP_LOGW(TAG, "32kHz capture spacing %.3f cycles/event (expected %u); rejecting TCXO reference",
+                 kf, (unsigned)kTcxoPrescale);
         tcxoRingN = 0;
+        tcxoRatioValid = false;
+        tcxoHoldoverGood = false;
         return;
       }
-      tcxoCyclesPerEvent = kr;
+      tcxoCyclesPerEvent = kTcxoPrescale;
       ESP_LOGI(TAG, "TCXO capture calibrated: %.0f cycles/event (%.1f events/s)",
-               kr, 32768.0 / kr);
+               tcxoCyclesPerEvent, 32768.0 / tcxoCyclesPerEvent);
     }
     double tcxoSec = (double)dCnt * tcxoCyclesPerEvent / 32768.0;
     double r = (double)(tick - baseTick) / tcxoSec;
