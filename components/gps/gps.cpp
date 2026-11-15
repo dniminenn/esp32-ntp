@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 
 #include "gps.h"
+#include "gps_quality_fresh.h"
 #include <stdlib.h>
 #include "config.h"
 #include "civil_time.h"
@@ -777,6 +778,7 @@ void GpsDiscipline::satCommitCycle() {
 }
 
 int GpsDiscipline::getSatellites(GpsSatellite* out, int maxOut) const {
+  if (!gps_quality_fresh(esp_timer_get_time(), lastNmeaUpdateUs)) return 0;
   int n = satPubN;
   if (n > maxOut) n = maxOut;
   for (int i = 0; i < n; ++i) out[i] = satPub[i];
@@ -1222,26 +1224,27 @@ void GpsDiscipline::getStats(GpsStats& out) const {
   out.nmeaMispairCount = statMispairCount;
   out.holdover = (gpsLock && holdover);
 
-  out.fixType     = qFixType;
-  out.timeValid   = qTimeValid && qFixType >= 2;
-  out.latitudeDeg = qLatDeg;
-  out.longitudeDeg = qLonDeg;
-  out.fixQuality  = qFixQuality;
-  out.fixMode     = qFixMode;
-  out.satsUsed    = qSatsUsed;
-  out.satsGps     = qSatsGps;
-  out.satsGlonass = qSatsGlonass;
-  out.satsGalileo = qSatsGalileo;
-  out.satsBeidou  = qSatsBeidou;
-  out.satsVisible = (uint8_t)(qSatsGps + qSatsGlonass + qSatsGalileo + qSatsBeidou);
-  out.satsTracked = qSatsTracked;
-  out.cn0Max      = qCn0Max;
-  out.cn0Mean     = qCn0Mean;
-  out.pdop        = qPdop;
-  out.hdop        = qHdop;
-  out.vdop        = qVdop;
-  out.altitudeM   = qAltitudeM;
   uint64_t nowUs = esp_timer_get_time();
+  bool qualityFresh = gps_quality_fresh(nowUs, lastNmeaUpdateUs);
+  out.fixType     = qualityFresh ? qFixType : 0;
+  out.timeValid   = qualityFresh && qTimeValid && qFixType >= 2;
+  out.latitudeDeg = qualityFresh ? qLatDeg : 0;
+  out.longitudeDeg = qualityFresh ? qLonDeg : 0;
+  out.fixQuality  = qualityFresh ? qFixQuality : 0;
+  out.fixMode     = qualityFresh ? qFixMode : 0;
+  out.satsUsed    = qualityFresh ? qSatsUsed : 0;
+  out.satsGps     = qualityFresh ? qSatsGps : 0;
+  out.satsGlonass = qualityFresh ? qSatsGlonass : 0;
+  out.satsGalileo = qualityFresh ? qSatsGalileo : 0;
+  out.satsBeidou  = qualityFresh ? qSatsBeidou : 0;
+  out.satsVisible = qualityFresh ? (uint8_t)(qSatsGps + qSatsGlonass + qSatsGalileo + qSatsBeidou) : 0;
+  out.satsTracked = qualityFresh ? qSatsTracked : 0;
+  out.cn0Max      = qualityFresh ? qCn0Max : 0;
+  out.cn0Mean     = qualityFresh ? qCn0Mean : 0;
+  out.pdop        = qualityFresh ? qPdop : 0;
+  out.hdop        = qualityFresh ? qHdop : 0;
+  out.vdop        = qualityFresh ? qVdop : 0;
+  out.altitudeM   = qualityFresh ? qAltitudeM : 0;
   out.nmeaAgeMs = lastNmeaUpdateUs ? (uint32_t)((nowUs - lastNmeaUpdateUs) / 1000) : 0;
   out.fitValid      = fitValid;
   out.fitSamples    = (uint32_t)fitCount;

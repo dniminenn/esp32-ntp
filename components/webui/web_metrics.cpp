@@ -79,7 +79,7 @@ void WebServer::sendMetrics() {
     "# HELP ntp_root_dispersion_seconds Estimated root dispersion\n"
     "# TYPE ntp_root_dispersion_seconds gauge\n"
     "ntp_root_dispersion_seconds %.6f\n"
-    "# HELP ntp_gps_lock GPS lock status\n"
+    "# HELP ntp_gps_lock Clock synchronized by GPS or credible holdover\n"
     "# TYPE ntp_gps_lock gauge\n"
     "ntp_gps_lock %d\n"
     "# HELP ntp_stratum NTP stratum\n"

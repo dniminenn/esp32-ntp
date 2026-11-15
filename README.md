@@ -475,7 +475,8 @@ retry backs off 1 s, 2 s, then 4 s rather than waiting 4 s to notice.
 | `ntp_frequency_ppm` | Estimated oscillator frequency error |
 | `ntp_pps_jitter_seconds` | PPS pulse jitter |
 | `ntp_root_dispersion_seconds` | Estimated root dispersion |
-| `ntp_gps_lock` | GPS lock state (1 = locked) |
+| `ntp_gps_lock` | Clock synchronization state (1 includes credible holdover) |
+| `gps_fix_type` / `gps_time_valid` | Current receiver fix and time validity; zero after valid NMEA stops for 2.5 s |
 | `ntp_stratum` | NTP stratum (1 when locked) |
 | `ntp_uptime_seconds` | Seconds since boot |
 | `ntp_requests_total` | NTP requests served |
