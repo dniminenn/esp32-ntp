@@ -28,6 +28,9 @@ int32_t w5k_tcp_recv(uint8_t socket_num, uint8_t* buf, uint16_t len);
 // after yielding), <0 when the connection is gone.
 int32_t w5k_tcp_send(uint8_t socket_num, const uint8_t* buf, uint16_t len);
 
+// 1 once the final queued chunk is sent, 0 while pending, <0 on error.
+int w5k_tcp_send_complete(uint8_t socket_num);
+
 // Graceful disconnect (sends FIN)
 int w5k_tcp_disconnect(uint8_t socket_num);
 
