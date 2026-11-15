@@ -224,6 +224,14 @@ void WebServer::closeConn() {
     if (client_sock >= 0) close(client_sock);
     client_sock = -1;
   } else {
+    // The last w5k_tcp_send() only stages a chunk. Wait for its SENDOK before
+    // DISCON, or the tail of a large settings page is lost at the TCP FIN.
+    const int64_t deadline = esp_timer_get_time() + 2000000;
+    int complete;
+    while ((complete = w5k_tcp_send_complete((uint8_t)sock)) == 0 &&
+           esp_timer_get_time() < deadline) vTaskDelay(1);
+    if (complete <= 0)
+      ESP_LOGW(TAG, "TCP response did not finish before disconnect (%d)", complete);
     w5k_tcp_disconnect((uint8_t)sock);
     disconnecting = true;
   }
@@ -267,6 +275,7 @@ void WebServer::sendAll(const char* data, int len) {
                                 // can no longer starve other tasks/the idle task
                                 // for the whole 2s deadline
   }
+  if (off != len) ESP_LOGW(TAG, "TCP response truncated: %d of %d bytes staged", off, len);
 }
 
 void WebServer::sendStatus(const char* status, const char* ctype, const char* body) {

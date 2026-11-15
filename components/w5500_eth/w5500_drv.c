@@ -233,10 +233,9 @@ int32_t w5500_tcp_recv(uint8_t sn, uint8_t* buf, uint16_t len) {
   return (int32_t)len;
 }
 
-int32_t w5500_tcp_send(uint8_t sn, const uint8_t* buf, uint16_t len) {
+int w5500_tcp_send_complete(uint8_t sn) {
   uint8_t sr = w5500_sock_status(sn);
   if (sr != W5500_SR_ESTABLISHED && sr != W5500_SR_CLOSE_WAIT) return -1;
-
   if (s_sending_mask & (1 << sn)) {
     uint8_t ir = w5500_rd8(W5500_SREG(sn, W5500_SN_IR));
     if (ir & W5500_IR_SENDOK) {
@@ -249,6 +248,13 @@ int32_t w5500_tcp_send(uint8_t sn, const uint8_t* buf, uint16_t len) {
       return 0;
     }
   }
+  return 1;
+}
+
+int32_t w5500_tcp_send(uint8_t sn, const uint8_t* buf, uint16_t len) {
+  int ready = w5500_tcp_send_complete(sn);
+  if (ready < 0) return ready;
+  if (ready == 0) return 0;
 
   if (len > W5500_SOCK_BUFSZ) len = W5500_SOCK_BUFSZ;
   if (w5500_rd16(W5500_SREG(sn, W5500_SN_TX_FSR)) < len) return 0;

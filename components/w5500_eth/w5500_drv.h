@@ -120,6 +120,8 @@ int32_t  w5500_tcp_recv(uint8_t sn, uint8_t* buf, uint16_t len);
  * the TX buffer lacks room (never spins on the peer), <0 when the connection
  * is gone. webui is built around the 0-means-retry contract. */
 int32_t  w5500_tcp_send(uint8_t sn, const uint8_t* buf, uint16_t len);
+/* 1 when the last TCP chunk has SENDOK, 0 while pending, <0 on error. */
+int      w5500_tcp_send_complete(uint8_t sn);
 int      w5500_tcp_discon(uint8_t sn);
 
 uint32_t w5500_mgmt_spin_timeouts(void);
