@@ -1,4 +1,4 @@
-SHELL := /usr/bin/bash
+SHELL := /usr/bin/env bash
 
 # SPDX-License-Identifier: Unlicense
 
